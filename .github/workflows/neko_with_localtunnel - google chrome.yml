@@ -84,16 +84,16 @@ jobs:
         TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
         TELEGRAM_USER_ID="${{ secrets.TELEGRAM_USER_ID }}"
 
-        # Read credentials without exposing them
+        # Read credentials safely without exposing them
         BORE_URL=$(cat bore_url.txt)
         LT_URL=$(cat lt-url.txt)
         PUBLIC_IP=$(cat public_ip.txt)
         NEKO_PASSWORD=$(cat neko_password.txt)
         NEKO_PASSWORD_ADMIN=$(cat neko_admin_password.txt)
 
-        # Escape special characters for MarkdownV2
+        # Manually escape Telegram MarkdownV2 special characters
         escape() {
-          echo "$1" | sed -E 's/([_*\[\]()~`>#+\-=|{}.!])/\\\1/g'
+          echo "$1" | sed -E 's/([][_*()~`>#+\-=|{}.!])/\\\1/g'
         }
 
         ESCAPED_BORE_URL=$(escape "$BORE_URL")
@@ -118,6 +118,7 @@ jobs:
 
         # Cleanup sensitive files
         rm -f lt-url.txt bore_url.txt public_ip.txt neko_password.txt neko_admin_password.txt
+
 
     - name: Sleep for 6 hours
       run: sleep 21600
