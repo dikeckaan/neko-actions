@@ -13,8 +13,8 @@ jobs:
 
     - name: Generate Random Passwords
       run: |
-        NEKO_PASSWORD=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | fold -w 12 | head -n 1)
-        NEKO_PASSWORD_ADMIN=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | fold -w 16 | head -n 1)
+        NEKO_PASSWORD=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
+        NEKO_PASSWORD_ADMIN=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)
         echo "NEKO_PASSWORD=$NEKO_PASSWORD" >> $GITHUB_ENV
         echo "NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN" >> $GITHUB_ENV
 
