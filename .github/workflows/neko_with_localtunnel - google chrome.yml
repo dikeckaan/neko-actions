@@ -84,16 +84,40 @@ jobs:
         TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
         TELEGRAM_USER_ID="${{ secrets.TELEGRAM_USER_ID }}"
 
-        # Read credentials from file and send to Telegram
-        MESSAGE=$(cat credentials.txt)
+        # Read credentials without exposing them
+        BORE_URL=$(cat bore_url.txt)
+        LT_URL=$(cat lt-url.txt)
+        PUBLIC_IP=$(cat public_ip.txt)
+        NEKO_PASSWORD=$(cat neko_password.txt)
+        NEKO_PASSWORD_ADMIN=$(cat neko_admin_password.txt)
 
+        # Escape special characters for MarkdownV2
+        escape() {
+          echo "$1" | sed -E 's/([_*\[\]()~`>#+\-=|{}.!])/\\\1/g'
+        }
+
+        ESCAPED_BORE_URL=$(escape "$BORE_URL")
+        ESCAPED_LT_URL=$(escape "$LT_URL")
+        ESCAPED_PUBLIC_IP=$(escape "$PUBLIC_IP")
+        ESCAPED_NEKO_PASSWORD=$(escape "$NEKO_PASSWORD")
+        ESCAPED_NEKO_PASSWORD_ADMIN=$(escape "$NEKO_PASSWORD_ADMIN")
+
+        # Construct the message securely
+        MESSAGE="🚀 *Neko Chrome is Now Live!*%0A%0A"
+        MESSAGE+="🔀 *Bore Tunnel URL:*%0A\`$ESCAPED_BORE_URL\`%0A%0A"
+        MESSAGE+="🌍 *LocalTunnel URL:*%0A\`$ESCAPED_LT_URL\`%0A%0A"
+        MESSAGE+="🌎 *Public IP:*%0A\`$ESCAPED_PUBLIC_IP\`%0A%0A"
+        MESSAGE+="🔹 *Neko Password:* \`$ESCAPED_NEKO_PASSWORD\`%0A"
+        MESSAGE+="🔹 *Neko Admin Password:* \`$ESCAPED_NEKO_PASSWORD_ADMIN\`%0A"
+
+        # Send message via Telegram
         curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
         -d "chat_id=$TELEGRAM_USER_ID" \
         -d "text=$MESSAGE" \
-        -d "parse_mode=MarkdownV2" >/dev/null 2>&1
+        -d "parse_mode=MarkdownV2"
 
         # Cleanup sensitive files
-        rm -f lt-url.txt bore_url.txt private_ip.txt public_ip.txt neko_password.txt neko_admin_password.txt credentials.txt
+        rm -f lt-url.txt bore_url.txt public_ip.txt neko_password.txt neko_admin_password.txt
 
     - name: Sleep for 6 hours
       run: sleep 21600
