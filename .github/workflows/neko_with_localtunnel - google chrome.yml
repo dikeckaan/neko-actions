@@ -13,8 +13,8 @@ jobs:
 
     - name: Generate Random Passwords
       run: |
-        NEKO_PASSWORD=$(openssl rand -base64 12)
-        NEKO_PASSWORD_ADMIN=$(openssl rand -base64 16)
+        NEKO_PASSWORD=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | fold -w 12 | head -n 1)
+        NEKO_PASSWORD_ADMIN=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | fold -w 16 | head -n 1)
         echo "NEKO_PASSWORD=$NEKO_PASSWORD" >> $GITHUB_ENV
         echo "NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN" >> $GITHUB_ENV
 
@@ -73,19 +73,9 @@ jobs:
       run: |
         TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
         TELEGRAM_USER_ID="${{ secrets.TELEGRAM_USER_ID }}"
-        # Escape special characters for MarkdownV2
-        ESCAPED_LT_URL=$(echo "$LT_URL" | sed 's/\./\\./g')
-        ESCAPED_BORE_URL=$(echo "$BORE_URL" | sed 's/\./\\./g')
-        ESCAPED_PRIVATE_IP=$(echo "$PRIVATE_IP" | sed 's/\./\\./g')
-        ESCAPED_PUBLIC_IP=$(echo "$PUBLIC_IP" | sed 's/\./\\./g')
         ESCAPED_NEKO_PASSWORD=$(echo "$NEKO_PASSWORD" | sed 's/\./\\./g')
         ESCAPED_NEKO_PASSWORD_ADMIN=$(echo "$NEKO_PASSWORD_ADMIN" | sed 's/\./\\./g')
-        
-        
-        MESSAGE="🚀 *Neko Chrome is Now Live\\!*%0A%0A"
-        MESSAGE+="🔀 *Bore Tunnel URL:*%0A\`$ESCAPED_BORE_URL\`%0A%0A"
-        MESSAGE+="🌍 *LocalTunnel URL:*%0A\`$ESCAPED_LT_URL\`%0A%0A"
-        MESSAGE+="🌎 *Password:*%0A\`$ESCAPED_PUBLIC_IP\`%0A%0A"
+        MESSAGE="🔑 *Neko Credentials*%0A"
         MESSAGE+="🔹 *Neko Password:* \`$ESCAPED_NEKO_PASSWORD\`%0A"
         MESSAGE+="🔹 *Neko Admin Password:* \`$ESCAPED_NEKO_PASSWORD_ADMIN\`%0A"
         curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
