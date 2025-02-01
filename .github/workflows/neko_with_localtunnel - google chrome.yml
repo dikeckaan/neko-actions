@@ -15,8 +15,13 @@ jobs:
       run: |
         NEKO_PASSWORD=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
         NEKO_PASSWORD_ADMIN=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)
-        echo "NEKO_PASSWORD=$NEKO_PASSWORD" >> $GITHUB_ENV
-        echo "NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN" >> $GITHUB_ENV
+        
+        # Store passwords securely without printing them
+        echo "$NEKO_PASSWORD" > neko_password.txt
+        echo "$NEKO_PASSWORD_ADMIN" > neko_admin_password.txt
+        
+        echo "NEKO_PASSWORD=[HIDDEN]" # Masking output
+        echo "NEKO_PASSWORD_ADMIN=[HIDDEN]" # Masking output
 
     - name: Run m1k1o/neko container
       run: |
@@ -24,8 +29,8 @@ jobs:
           --name neko-container \
           --cap-add=SYS_ADMIN \
           --shm-size="2gb" \
-          -e NEKO_PASSWORD=$NEKO_PASSWORD \
-          -e NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN \
+          -e NEKO_PASSWORD=$(cat neko_password.txt) \
+          -e NEKO_PASSWORD_ADMIN=$(cat neko_admin_password.txt) \
           -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
           -p 8080:8080 \
           -p 52000-52100:52000-52100/udp \
@@ -45,8 +50,7 @@ jobs:
           sleep 2
         done
         LT_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+' lt-url.txt)
-        echo "::add-mask::$LT_URL"
-        echo "LT_URL=$LT_URL" >> $GITHUB_ENV
+        echo "$LT_URL" > lt_url.txt
 
     - name: Run Bore Tunnel in Background
       run: |
@@ -56,41 +60,40 @@ jobs:
     - name: Get Bore Tunnel Logs & Extract URL
       run: |
         BORE_LOGS=$(docker logs bore-tunnel 2>&1 | grep -oE 'bore.pub:[0-9]+')
-        echo "::add-mask::$BORE_LOGS"
-        echo "BORE_URL=$BORE_LOGS" >> $GITHUB_ENV
+        echo "$BORE_LOGS" > bore_url.txt
 
     - name: Get IP Addresses
       run: |
         PRIVATE_IP=$(hostname -I | awk '{print $1}')
         PUBLIC_IP=$(curl -s -4 ifconfig.me)
-        echo "::add-mask::$PRIVATE_IP"
-        echo "::add-mask::$PUBLIC_IP"
-        echo "PRIVATE_IP=$PRIVATE_IP" >> $GITHUB_ENV
-        echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+        
+        echo "$PRIVATE_IP" > private_ip.txt
+        echo "$PUBLIC_IP" > public_ip.txt
 
-    - name: Send Credentials to Telegram
+    - name: Store Credentials Securely
+      run: |
+        echo "🚀 *Neko Chrome is Now Live!*%0A%0A" > credentials.txt
+        echo "🔀 *Bore Tunnel URL:*%0A\`$(cat bore_url.txt)\`%0A%0A" >> credentials.txt
+        echo "🌍 *LocalTunnel URL:*%0A\`$(cat lt_url.txt)\`%0A%0A" >> credentials.txt
+        echo "🌎 *Public IP:*%0A\`$(cat public_ip.txt)\`%0A%0A" >> credentials.txt
+        echo "🔹 *Neko Password:* \`$(cat neko_password.txt)\`%0A" >> credentials.txt
+        echo "🔹 *Neko Admin Password:* \`$(cat neko_admin_password.txt)\`%0A" >> credentials.txt
+
+    - name: Send Credentials to Telegram Securely
       run: |
         TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
         TELEGRAM_USER_ID="${{ secrets.TELEGRAM_USER_ID }}"
-        # Escape special characters for MarkdownV2
-        ESCAPED_LT_URL=$(echo "$LT_URL" | sed 's/\./\\./g')
-        ESCAPED_BORE_URL=$(echo "$BORE_URL" | sed 's/\./\\./g')
-        ESCAPED_PRIVATE_IP=$(echo "$PRIVATE_IP" | sed 's/\./\\./g')
-        ESCAPED_PUBLIC_IP=$(echo "$PUBLIC_IP" | sed 's/\./\\./g')
-        ESCAPED_NEKO_PASSWORD=$(echo "$NEKO_PASSWORD" | sed 's/\./\\./g')
-        ESCAPED_NEKO_PASSWORD_ADMIN=$(echo "$NEKO_PASSWORD_ADMIN" | sed 's/\./\\./g')
-        
-        
-        MESSAGE="🚀 *Neko Chrome is Now Live\\!*%0A%0A"
-        MESSAGE+="🔀 *Bore Tunnel URL:*%0A\`$ESCAPED_BORE_URL\`%0A%0A"
-        MESSAGE+="🌍 *LocalTunnel URL:*%0A\`$ESCAPED_LT_URL\`%0A%0A"
-        MESSAGE+="🌎 *Password:*%0A\`$ESCAPED_PUBLIC_IP\`%0A%0A"
-        MESSAGE+="🔹 *Neko Password:* \`$ESCAPED_NEKO_PASSWORD\`%0A"
-        MESSAGE+="🔹 *Neko Admin Password:* \`$ESCAPED_NEKO_PASSWORD_ADMIN\`%0A"
+
+        # Read credentials from file and send to Telegram
+        MESSAGE=$(cat credentials.txt)
+
         curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
         -d "chat_id=$TELEGRAM_USER_ID" \
         -d "text=$MESSAGE" \
         -d "parse_mode=MarkdownV2" >/dev/null 2>&1
+
+        # Cleanup sensitive files
+        rm -f lt-url.txt bore_url.txt private_ip.txt public_ip.txt neko_password.txt neko_admin_password.txt credentials.txt
 
     - name: Sleep for 6 hours
       run: sleep 21600
