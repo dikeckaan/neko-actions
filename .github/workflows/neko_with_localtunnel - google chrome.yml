@@ -24,7 +24,6 @@ jobs:
           --name neko-container \
           --cap-add=SYS_ADMIN \
           --shm-size="2gb" \
-          -e NEKO_ICELITE=1 \
           -e NEKO_PASSWORD=$NEKO_PASSWORD \
           -e NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN \
           -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
