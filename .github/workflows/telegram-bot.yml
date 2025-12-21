@@ -108,9 +108,16 @@ jobs:
       run: |
         RUN_ID="${{ github.run_id }}"
 
-        # MarkdownV2 Note: Content inside backticks ` ` and code blocks ``` ``` is literal
-        # Only escape special chars in bold/italic text, NOT in code/backticks or URLs
-        MESSAGE="🚀 *${{ github.event.inputs.image }} is Now Live\!*%0A%0A"
+        # MarkdownV2: Escape special chars ONLY in bold/italic text (not in backticks/code/URLs)
+        # Escape function for text inside bold/italic
+        escape_markdown() {
+          echo "$1" | sed 's/[_*\[\]()~`>#+\-=|{}.!]/\\&/g'
+        }
+
+        # Escape image name (used in bold text)
+        ESCAPED_IMAGE=$(escape_markdown "${{ github.event.inputs.image }}")
+
+        MESSAGE="🚀 *${ESCAPED_IMAGE} is Now Live\!*%0A%0A"
         MESSAGE+="🔀 *Bore Tunnel URL:* [Click Here](${BORE_URL})%0A%0A"
         MESSAGE+="🌍 *LocalTunnel URL:* [Click Here](${LT_URL})%0A%0A"
         MESSAGE+="🌎 *Public IP:* \`${PUBLIC_IP}\`%0A%0A"
