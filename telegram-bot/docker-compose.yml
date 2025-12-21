@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neko-telegram-bot
+    restart: unless-stopped
+
+    # Mount .env file (make sure it exists!)
+    env_file:
+      - .env
+
+    # Volumes for development (optional - uncomment if you want live reload)
+    # volumes:
+    #   - ./telegram-manager.py:/app/telegram-manager.py:ro
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f telegram-manager.py || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
