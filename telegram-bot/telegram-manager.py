@@ -19,6 +19,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ALLOWED_USER_IDS = os.getenv("ALLOWED_USER_IDS", "").split(",")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "dikeckaan/neko-actions")
 WORKFLOW_NAME = os.getenv("WORKFLOW_NAME", "telegram-bot.yml")
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "improvements")
 
 # Browser command mapping
 BROWSER_COMMANDS = {
@@ -52,7 +53,7 @@ def trigger_workflow(chat_id: str, image: str, bot_token: str) -> dict:
         "X-GitHub-Api-Version": "2022-11-28"
     }
     payload = {
-        "ref": "master",
+        "ref": GITHUB_BRANCH,
         "inputs": {
             "chatid": chat_id,
             "image": image,
