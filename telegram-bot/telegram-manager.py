@@ -1,7 +1,7 @@
 import os
 import logging
 import requests
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
 
@@ -133,20 +133,126 @@ async def button_handler(update: Update, context):
 
 
 
+async def start_command(update: Update, context):
+    """Handle /start command - Welcome message with inline keyboard."""
+    if not is_authorized(update.message.from_user.id):
+        await update.message.reply_text("⛔ You are not authorized to use this bot.")
+        return
+
+    user_name = update.message.from_user.first_name or "User"
+
+    welcome_text = (
+        f"👋 *Welcome {user_name}!*\n\n"
+        "🚀 *Neko Actions Bot* - Deploy remote desktop instances on demand\n\n"
+        "This bot allows you to deploy containerized desktop environments "
+        "(browsers, VLC, KDE, etc.) using GitHub Actions.\n\n"
+        "Use the buttons below to get started:"
+    )
+
+    # Create inline keyboard
+    keyboard = [
+        [InlineKeyboardButton("📋 Available Commands", callback_data="list_commands")],
+        [InlineKeyboardButton("❓ Help & Guide", callback_data="show_help")],
+        [InlineKeyboardButton("🌐 GitHub Repository", url=f"https://github.com/{GITHUB_REPO}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        welcome_text,
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+async def help_command(update: Update, context):
+    """Handle /help command - Show detailed usage guide."""
+    if not is_authorized(update.message.from_user.id):
+        await update.message.reply_text("⛔ You are not authorized to use this bot.")
+        return
+
+    help_text = (
+        "📖 *User Guide*\n\n"
+        "*How to Use:*\n"
+        "1️⃣ Choose a browser or desktop environment\n"
+        "2️⃣ Send the command (e.g., `/chrome`)\n"
+        "3️⃣ Wait for deployment (takes ~1-2 minutes)\n"
+        "4️⃣ Receive connection details via message\n"
+        "5️⃣ Click *Cancel* button to stop the instance\n\n"
+
+        "*Available Commands:*\n"
+        "• `/start` - Show welcome menu\n"
+        "• `/help` - Show this guide\n"
+        "• `/actionslist` - List all browser commands\n\n"
+
+        "*Instance Details:*\n"
+        "• Runtime: Up to 6 hours\n"
+        "• Access: Via Bore Tunnel or LocalTunnel\n"
+        "• Auto-cleanup: Resources freed after stop\n"
+        "• Health checks: Every 5 minutes\n\n"
+
+        "*Troubleshooting:*\n"
+        "❌ If deployment fails, you'll receive an error message\n"
+        "🔄 Check GitHub Actions logs for details\n"
+        "⏱️ Cancel button works immediately\n\n"
+
+        f"💡 *Repository:* [GitHub]({f'https://github.com/{GITHUB_REPO}'})"
+    )
+
+    await update.message.reply_text(help_text, parse_mode="Markdown", disable_web_page_preview=True)
+
 async def actions_list(update: Update, context):
     """List available commands for starting browsers or other applications."""
     if not is_authorized(update.message.from_user.id):
         await update.message.reply_text("⛔ You are not authorized to use this bot.")
         return
 
-    command_list = "\n".join([f"/{cmd}" for cmd in BROWSER_COMMANDS.keys()])
+    command_list = "\n".join([f"• `/{cmd}`" for cmd in BROWSER_COMMANDS.keys()])
     response_text = (
         "🎯 *Available Commands:*\n\n"
         f"{command_list}\n\n"
-        "To start an instance, simply type the command (e.g., `/chrome`)\n"
+        "*Usage:*\n"
+        "Simply type any command above to start an instance\n"
+        "Example: `/chrome` to start Google Chrome\n\n"
         "To stop a running instance, click the *Cancel* button on the deployment message."
     )
     await update.message.reply_text(response_text, parse_mode="Markdown")
+
+async def menu_callback_handler(update: Update, context):
+    """Handle inline keyboard button clicks from the menu."""
+    query = update.callback_query
+
+    if not is_authorized(query.from_user.id):
+        await query.answer("⛔ You are not authorized to perform this action.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if query.data == "list_commands":
+        command_list = "\n".join([f"• `/{cmd}`" for cmd in BROWSER_COMMANDS.keys()])
+        response_text = (
+            "🎯 *Available Commands:*\n\n"
+            f"{command_list}\n\n"
+            "*Usage:*\n"
+            "Simply type any command above to start an instance\n"
+            "Example: `/chrome` to start Google Chrome"
+        )
+        await query.edit_message_text(response_text, parse_mode="Markdown")
+
+    elif query.data == "show_help":
+        help_text = (
+            "📖 *Quick Guide*\n\n"
+            "*Steps:*\n"
+            "1️⃣ Send a command (e.g., `/chrome`)\n"
+            "2️⃣ Wait ~1-2 minutes for deployment\n"
+            "3️⃣ Receive connection URLs\n"
+            "4️⃣ Click *Cancel* to stop\n\n"
+
+            "*Runtime:* Up to 6 hours\n"
+            "*Access:* Bore Tunnel or LocalTunnel\n"
+            "*Auto-cleanup:* Yes\n\n"
+
+            "Use `/help` for full documentation"
+        )
+        await query.edit_message_text(help_text, parse_mode="Markdown")
     
     
 def main():
@@ -162,15 +268,20 @@ def main():
     logger.info("Starting Telegram bot...")
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # Add main menu commands
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("actionslist", actions_list))
+
     # Add command handlers dynamically for all browsers
     for command in BROWSER_COMMANDS.keys():
         app.add_handler(CommandHandler(command, start_browser))
 
-    # Add callback handler for inline keyboard buttons
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    # Add utility commands
-    app.add_handler(CommandHandler("actionslist", actions_list))
+    # Add callback handlers for inline keyboard buttons
+    # Menu callbacks (from /start command)
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(list_commands|show_help)$"))
+    # Cancel button callbacks (from deployment messages)
+    app.add_handler(CallbackQueryHandler(button_handler, pattern="^[0-9]+$"))
 
     logger.info("Bot is running. Press Ctrl+C to stop.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
