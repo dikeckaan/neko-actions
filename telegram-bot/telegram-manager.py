@@ -20,6 +20,7 @@ ALLOWED_USER_IDS = os.getenv("ALLOWED_USER_IDS", "").split(",")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "dikeckaan/neko-actions")
 WORKFLOW_NAME = os.getenv("WORKFLOW_NAME", "telegram-bot.yml")
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "improvements")
+CLOUDFLARE_TUNNEL_TOKEN = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "")
 
 # Browser command mapping
 BROWSER_COMMANDS = {
@@ -44,7 +45,7 @@ def is_authorized(user_id: int) -> bool:
     """Check if user is authorized to use the bot."""
     return str(user_id) in ALLOWED_USER_IDS
 
-def trigger_workflow(chat_id: str, image: str, bot_token: str) -> dict:
+def trigger_workflow(chat_id: str, image: str, bot_token: str, cf_token: str = "") -> dict:
     """Trigger GitHub Actions workflow using GitHub API."""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{WORKFLOW_NAME}/dispatches"
     headers = {
@@ -57,7 +58,8 @@ def trigger_workflow(chat_id: str, image: str, bot_token: str) -> dict:
         "inputs": {
             "chatid": chat_id,
             "image": image,
-            "bottoken": bot_token
+            "bottoken": bot_token,
+            "cloudflaretoken": cf_token
         }
     }
 
@@ -110,8 +112,8 @@ async def start_browser(update: Update, context):
     # Send initial acknowledgment
     await update.message.reply_text(f"🔄 Starting {image_name} instance...")
 
-    # Trigger the workflow
-    result = trigger_workflow(chat_id, image_name, TELEGRAM_BOT_TOKEN)
+    # Trigger the workflow with Cloudflare token (if configured)
+    result = trigger_workflow(chat_id, image_name, TELEGRAM_BOT_TOKEN, CLOUDFLARE_TUNNEL_TOKEN)
     await update.message.reply_text(result["message"])
 
 async def stop_machine(run_id: str, query):

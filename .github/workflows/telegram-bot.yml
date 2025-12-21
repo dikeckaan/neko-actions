@@ -12,6 +12,10 @@ on:
       bottoken:
         description: "Telegram Bot Token"
         required: true
+      cloudflaretoken:
+        description: "Cloudflare Tunnel Token (optional)"
+        required: false
+        default: ""
 
 jobs:
   run-neko-docker:
@@ -92,6 +96,48 @@ jobs:
         echo "BORE_URL=$BORE_URL" >> $GITHUB_ENV
         echo "Bore URL: $BORE_URL"
 
+    - name: Install Cloudflare Tunnel
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        cloudflared --version
+
+    - name: Run Cloudflare Tunnel
+      run: |
+        CF_TOKEN="${{ github.event.inputs.cloudflaretoken }}"
+
+        if [ -n "$CF_TOKEN" ]; then
+          # Named tunnel with token
+          echo "Starting named Cloudflare Tunnel..."
+          nohup cloudflared tunnel run --token "$CF_TOKEN" > cf-tunnel.log 2>&1 &
+          sleep 10
+
+          # Extract URL from logs (named tunnels show their URL)
+          CF_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com|https://[a-zA-Z0-9.-]+\.[a-z]+' cf-tunnel.log | head -1)
+
+          if [ -z "$CF_URL" ]; then
+            echo "⚠️ Could not extract named tunnel URL, using placeholder"
+            CF_URL="https://your-tunnel.cfargotunnel.com"
+          fi
+        else
+          # Quick tunnel (random domain)
+          echo "Starting quick Cloudflare Tunnel..."
+          nohup cloudflared tunnel --url http://localhost:8080 > cf-tunnel.log 2>&1 &
+          sleep 10
+
+          # Extract URL from quick tunnel logs
+          CF_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' cf-tunnel.log | head -1)
+
+          if [ -z "$CF_URL" ]; then
+            echo "⚠️ Could not extract quick tunnel URL"
+            CF_URL="https://unavailable.trycloudflare.com"
+          fi
+        fi
+
+        echo "::add-mask::$CF_URL"
+        echo "CF_URL=$CF_URL" >> $GITHUB_ENV
+        echo "Cloudflare URL: $CF_URL"
+
     - name: Get IP Addresses
       run: |
         PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -110,6 +156,7 @@ jobs:
 
         # Use HTML format - much simpler than MarkdownV2!
         MESSAGE="🚀 <b>${{ github.event.inputs.image }} is Now Live!</b>%0A%0A"
+        MESSAGE+="☁️ <b>Cloudflare Tunnel:</b> <a href=\"${CF_URL}\">Click Here</a>%0A%0A"
         MESSAGE+="🔀 <b>Bore Tunnel URL:</b> <a href=\"${BORE_URL}\">Click Here</a>%0A%0A"
         MESSAGE+="🌍 <b>LocalTunnel URL:</b> <a href=\"${LT_URL}\">Click Here</a>%0A%0A"
         MESSAGE+="🌎 <b>Public IP:</b> <code>${PUBLIC_IP}</code>%0A%0A"
@@ -203,9 +250,11 @@ jobs:
         docker stop neko-container bore-tunnel 2>/dev/null || true
         docker rm neko-container bore-tunnel 2>/dev/null || true
 
-        # Kill LocalTunnel processes
+        # Kill tunnel processes
         pkill -f localtunnel || true
+        pkill -f cloudflared || true
 
         # Show cleanup summary
         echo "✅ Cleanup completed"
         docker ps -a | grep -E "neko-container|bore-tunnel" || echo "All containers removed"
+        pgrep -f "localtunnel|cloudflared" || echo "All tunnel processes stopped"
