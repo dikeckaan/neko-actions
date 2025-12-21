@@ -41,8 +41,32 @@ jobs:
         echo "TELEGRAM_BOT_TOKEN=${{ github.event.inputs.bottoken }}" >> $GITHUB_ENV
         echo "TELEGRAM_USER_ID=${{ github.event.inputs.chatid }}" >> $GITHUB_ENV
 
-    - name: Run m1k1o/neko container
+    - name: Pull and Run m1k1o/neko container
       run: |
+        IMAGE_NAME="${{ github.event.inputs.image }}"
+
+        # Try GitHub Container Registry first (ghcr.io)
+        GHCR_IMAGE="ghcr.io/m1k1o/neko/${IMAGE_NAME}"
+        DOCKERHUB_IMAGE="m1k1o/neko:${IMAGE_NAME}"
+
+        echo "Attempting to pull from GitHub Container Registry..."
+        if docker pull "$GHCR_IMAGE"; then
+          echo "✅ Successfully pulled from ghcr.io"
+          DOCKER_IMAGE="$GHCR_IMAGE"
+        else
+          echo "⚠️ Failed to pull from ghcr.io, trying Docker Hub..."
+          if docker pull "$DOCKERHUB_IMAGE"; then
+            echo "✅ Successfully pulled from Docker Hub"
+            DOCKER_IMAGE="$DOCKERHUB_IMAGE"
+          else
+            echo "❌ Failed to pull image from both registries"
+            exit 1
+          fi
+        fi
+
+        echo "Using image: $DOCKER_IMAGE"
+
+        # Run container with selected image
         docker run -d \
           --name neko-container \
           --cap-add=SYS_ADMIN \
@@ -52,7 +76,7 @@ jobs:
           -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
           -p 8080:8080 \
           -p 52000-52100:52000-52100/udp \
-          m1k1o/neko:${{ github.event.inputs.image }}
+          "$DOCKER_IMAGE"
 
     - name: Verify container is running
       run: |

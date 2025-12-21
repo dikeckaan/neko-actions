@@ -37,10 +37,11 @@ Based on [m1k1o/neko](https://github.com/m1k1o/neko) - a self-hosted virtual bro
 - 🛑 **Instant Cancellation** - Stop deployments with a single button click
 
 ### Supported Environments
-- 🌍 **Browsers**: Chrome, Firefox, Edge, Chromium, Opera, Vivaldi, Brave, Ungoogled Chromium
+- 🌍 **Firefox-based**: Firefox, Tor Browser, Waterfox
+- 🌐 **Chromium-based**: Chrome, Chromium, Ungoogled Chromium, Edge, Brave, Vivaldi, Opera
 - 🖥️ **Desktops**: KDE, XFCE
 - 📺 **Media**: VLC
-- 🔧 **Tools**: Remmina, Latest
+- 🔧 **Tools**: Remmina
 
 ### User Experience
 - 📱 Interactive Telegram bot with inline keyboards
@@ -288,21 +289,35 @@ URL format: `https://random-name.loca.lt`
 
 ### Browser/Desktop Commands
 
+#### Firefox-based Browsers
+| Command | Environment | Description |
+|---------|-------------|-------------|
+| `/firefox` | Firefox | Latest stable Firefox browser |
+| `/tor` | Tor Browser | Privacy-focused Tor Browser |
+| `/waterfox` | Waterfox | Privacy-focused Firefox fork |
+
+#### Chromium-based Browsers
 | Command | Environment | Description |
 |---------|-------------|-------------|
 | `/chrome` | Google Chrome | Latest stable Chrome browser |
-| `/firefox` | Firefox | Latest stable Firefox browser |
-| `/edge` | Microsoft Edge | Microsoft Edge browser |
 | `/chromium` | Chromium | Open-source Chromium browser |
+| `/ungoogled_chromium` | Ungoogled Chromium | Privacy-enhanced Chromium (no Google services) |
+| `/edge` | Microsoft Edge | Microsoft Edge browser |
+| `/brave` | Brave | Privacy-focused Brave browser with ad-blocking |
+| `/vivaldi` | Vivaldi | Feature-rich Vivaldi browser |
 | `/opera` | Opera | Opera browser |
-| `/vivaldi` | Vivaldi | Vivaldi browser |
-| `/brave` | Brave | Privacy-focused Brave browser |
-| `/ungoogled_chromium` | Ungoogled Chromium | Privacy-enhanced Chromium |
-| `/kde` | KDE Desktop | Full KDE Plasma desktop environment |
-| `/xfce` | XFCE Desktop | Lightweight XFCE desktop |
-| `/vlc` | VLC Media Player | VLC media player |
+
+#### Desktop Environments
+| Command | Environment | Description |
+|---------|-------------|-------------|
+| `/xfce` | XFCE Desktop | Lightweight XFCE desktop environment |
+| `/kde` | KDE Desktop | Full-featured KDE Plasma desktop environment |
+
+#### Other Applications
+| Command | Environment | Description |
+|---------|-------------|-------------|
 | `/remmina` | Remmina | Remote desktop client |
-| `/latest` | Latest | Latest experimental build |
+| `/vlc` | VLC Media Player | VLC media player |
 
 ### Interactive Features
 
@@ -501,7 +516,7 @@ docker logs neko-telegram-bot
 │                  GitHub Actions                          │
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  1. Deploy Neko Docker Container                  │  │
-│  │     - Pull image (m1k1o/neko:<environment>)       │  │
+│  │     - Pull image from ghcr.io (fallback: Docker)  │  │
 │  │     - Generate random passwords                   │  │
 │  │     - Start container on port 8080                │  │
 │  └───────────────────────────────────────────────────┘  │
@@ -547,6 +562,7 @@ docker logs neko-telegram-bot
 - **Bot Framework:** python-telegram-bot
 - **HTTP Client:** requests
 - **Containerization:** Docker
+- **Container Registry:** GitHub Container Registry (ghcr.io) with Docker Hub fallback
 - **CI/CD:** GitHub Actions
 - **Tunneling:** Cloudflare Tunnel, Bore, LocalTunnel
 - **Remote Desktop:** Neko (Docker)

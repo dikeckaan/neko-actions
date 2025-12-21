@@ -22,20 +22,29 @@ WORKFLOW_NAME = os.getenv("WORKFLOW_NAME", "telegram-bot.yml")
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "improvements")
 CLOUDFLARE_TUNNEL_TOKEN = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "")
 
-# Browser command mapping
+# Browser/Desktop command mapping
+# Format: command -> image_name (will use ghcr.io/m1k1o/neko/<image_name>)
 BROWSER_COMMANDS = {
-    "chrome": "google-chrome",
-    "kde": "kde",
-    "chromium": "chromium",
-    "edge": "microsoft-edge",
-    "opera": "opera",
-    "vivaldi": "vivaldi",
-    "ungoogled_chromium": "ungoogled-chromium",
-    "brave": "brave",
+    # Firefox-based browsers
     "firefox": "firefox",
-    "latest": "latest",
-    "remmina": "remmina",
+    "tor": "tor-browser",
+    "waterfox": "waterfox",
+
+    # Chromium-based browsers
+    "chromium": "chromium",
+    "chrome": "google-chrome",
+    "ungoogled_chromium": "ungoogled-chromium",
+    "edge": "microsoft-edge",
+    "brave": "brave",
+    "vivaldi": "vivaldi",
+    "opera": "opera",
+
+    # Desktop Environments
     "xfce": "xfce",
+    "kde": "kde",
+
+    # Other Applications
+    "remmina": "remmina",
     "vlc": "vlc"
 }
 
