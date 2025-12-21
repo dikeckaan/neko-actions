@@ -108,17 +108,28 @@ jobs:
       run: |
         RUN_ID="${{ github.run_id }}"
 
-        # Escape special characters for MarkdownV2
+        # Function to escape special characters for MarkdownV2
         # Need to escape: _ * [ ] ( ) ~ ` > # + - = | { } . !
-        ESCAPED_IMAGE=$(echo "${{ github.event.inputs.image }}" | sed 's/[_*\[\]()~`>#+\-=|{}.!]/\\&/g')
+        escape_markdown() {
+          echo "$1" | sed 's/[_*\[\]()~`>#+\-=|{}.!]/\\&/g'
+        }
+
+        # Escape all variables
+        ESCAPED_IMAGE=$(escape_markdown "${{ github.event.inputs.image }}")
+        ESCAPED_BORE_URL=$(escape_markdown "$BORE_URL")
+        ESCAPED_LT_URL=$(escape_markdown "$LT_URL")
+        ESCAPED_PUBLIC_IP=$(escape_markdown "$PUBLIC_IP")
+        ESCAPED_NEKO_PASSWORD=$(escape_markdown "$NEKO_PASSWORD")
+        ESCAPED_NEKO_PASSWORD_ADMIN=$(escape_markdown "$NEKO_PASSWORD_ADMIN")
+        ESCAPED_RUN_ID=$(escape_markdown "$RUN_ID")
 
         MESSAGE="🚀 *${ESCAPED_IMAGE} is Now Live\!*%0A%0A"
-        MESSAGE+="🔀 *Bore Tunnel URL:* [Click Here](${BORE_URL})%0A%0A"
-        MESSAGE+="🌍 *LocalTunnel URL:* [Click Here](${LT_URL})%0A%0A"
-        MESSAGE+="🌎 *Public IP:* \`${PUBLIC_IP}\`%0A%0A"
-        MESSAGE+="🔹 *Neko Password:* \`${NEKO_PASSWORD}\`%0A"
-        MESSAGE+="🔹 *Neko Admin Password:* \`${NEKO_PASSWORD_ADMIN}\`%0A%0A"
-        MESSAGE+="🆔 *Run ID:* %0A\`\`\`${RUN_ID}\`\`\`%0A"
+        MESSAGE+="🔀 *Bore Tunnel:* [Click Here](${BORE_URL})%0A%0A"
+        MESSAGE+="🌍 *LocalTunnel:* [Click Here](${LT_URL})%0A%0A"
+        MESSAGE+="🌎 *Public IP:* \`${ESCAPED_PUBLIC_IP}\`%0A%0A"
+        MESSAGE+="🔹 *Neko Password:* \`${ESCAPED_NEKO_PASSWORD}\`%0A"
+        MESSAGE+="🔹 *Neko Admin Password:* \`${ESCAPED_NEKO_PASSWORD_ADMIN}\`%0A%0A"
+        MESSAGE+="🆔 *Run ID:* \`${ESCAPED_RUN_ID}\`"
         INLINE_KEYBOARD='{"inline_keyboard":[[{"text":"Cancel","callback_data":"'"$RUN_ID"'"}]]}'
 
         echo "Sending message to Telegram..."
