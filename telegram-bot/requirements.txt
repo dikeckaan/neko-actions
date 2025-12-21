@@ -1,0 +1,8 @@
+# Telegram Bot Framework
+python-telegram-bot==21.0.1
+
+# HTTP Requests Library
+requests==2.31.0
+
+# Environment Variables Management
+python-dotenv==1.0.1

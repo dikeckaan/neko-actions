@@ -51,7 +51,18 @@ jobs:
           m1k1o/neko:${{ github.event.inputs.image }}
 
     - name: Verify container is running
-      run: docker ps
+      run: |
+        echo "Waiting for container to be ready..."
+        sleep 5
+
+        if docker ps | grep -q neko-container; then
+          echo "✅ Container is running successfully"
+          docker ps --filter name=neko-container
+        else
+          echo "❌ Container failed to start"
+          docker logs neko-container
+          exit 1
+        fi
 
     - name: Install LocalTunnel
       run: npm install -g localtunnel
@@ -109,5 +120,59 @@ jobs:
         -d "parse_mode=MarkdownV2" \
         -d "reply_markup=$INLINE_KEYBOARD" >/dev/null 2>&1
 
-    - name: Sleep for 6 hours
-      run: sleep 21600
+    - name: Keep instance alive (6 hours with periodic health checks)
+      run: |
+        echo "Instance is running. Performing periodic health checks..."
+        END_TIME=$((SECONDS + 21600))  # 6 hours from now
+
+        while [ $SECONDS -lt $END_TIME ]; do
+          # Check if container is still running
+          if ! docker ps | grep -q neko-container; then
+            echo "⚠️ Container stopped unexpectedly!"
+            exit 1
+          fi
+
+          # Health check
+          if curl -sf http://localhost:8080 > /dev/null 2>&1; then
+            echo "✅ Health check passed at $(date)"
+          else
+            echo "⚠️ Health check failed at $(date)"
+          fi
+
+          # Sleep for 5 minutes before next check
+          sleep 300
+        done
+
+        echo "🕐 6 hour limit reached. Shutting down gracefully..."
+
+    - name: Send Error Notification
+      if: failure()
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_USER_ID: ${{ env.TELEGRAM_USER_ID }}
+      run: |
+        RUN_ID="${{ github.run_id }}"
+        ERROR_MESSAGE="❌ *Deployment Failed*%0A%0A"
+        ERROR_MESSAGE+="🆔 *Run ID:* \`$RUN_ID\`%0A"
+        ERROR_MESSAGE+="🔗 *Logs:* [View Details](https://github.com/${{ github.repository }}/actions/runs/$RUN_ID)"
+
+        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+        -d "chat_id=$TELEGRAM_USER_ID" \
+        -d "text=$ERROR_MESSAGE" \
+        -d "parse_mode=MarkdownV2" >/dev/null 2>&1
+
+    - name: Cleanup Resources
+      if: always()
+      run: |
+        echo "🧹 Cleaning up resources..."
+
+        # Stop and remove Docker containers
+        docker stop neko-container bore-tunnel 2>/dev/null || true
+        docker rm neko-container bore-tunnel 2>/dev/null || true
+
+        # Kill LocalTunnel processes
+        pkill -f localtunnel || true
+
+        # Show cleanup summary
+        echo "✅ Cleanup completed"
+        docker ps -a | grep -E "neko-container|bore-tunnel" || echo "All containers removed"
