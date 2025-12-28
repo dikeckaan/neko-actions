@@ -38,12 +38,15 @@ jobs:
       run: |
         echo "::add-mask::${{ github.event.inputs.bottoken }}"
         echo "::add-mask::${{ github.event.inputs.chatid }}"
+        echo "::add-mask::${{ github.event.inputs.cloudflaretoken }}"
         echo "TELEGRAM_BOT_TOKEN=${{ github.event.inputs.bottoken }}" >> $GITHUB_ENV
         echo "TELEGRAM_USER_ID=${{ github.event.inputs.chatid }}" >> $GITHUB_ENV
+        echo "CLOUDFLARE_TUNNEL_TOKEN=${{ github.event.inputs.cloudflaretoken }}" >> $GITHUB_ENV
 
     - name: Pull and Run m1k1o/neko container
       run: |
         IMAGE_NAME="${{ github.event.inputs.image }}"
+        echo "::add-mask::$IMAGE_NAME"
 
         # Try GitHub Container Registry first (ghcr.io)
         GHCR_IMAGE="ghcr.io/m1k1o/neko/${IMAGE_NAME}"
@@ -118,7 +121,7 @@ jobs:
         echo "::add-mask::$BORE_LOGS"
         echo "::add-mask::$BORE_URL"
         echo "BORE_URL=$BORE_URL" >> $GITHUB_ENV
-        echo "Bore URL: $BORE_URL"
+        echo "✅ Bore tunnel configured successfully"
 
     - name: Install Cloudflare Tunnel
       run: |
@@ -128,7 +131,7 @@ jobs:
 
     - name: Run Cloudflare Tunnel
       run: |
-        CF_TOKEN="${{ github.event.inputs.cloudflaretoken }}"
+        CF_TOKEN="${{ env.CLOUDFLARE_TUNNEL_TOKEN }}"
 
         if [ -n "$CF_TOKEN" ]; then
           # Named tunnel with token
@@ -160,7 +163,7 @@ jobs:
 
         echo "::add-mask::$CF_URL"
         echo "CF_URL=$CF_URL" >> $GITHUB_ENV
-        echo "Cloudflare URL: $CF_URL"
+        echo "✅ Cloudflare tunnel configured successfully"
 
     - name: Get IP Addresses
       run: |
@@ -177,6 +180,7 @@ jobs:
         TELEGRAM_USER_ID: ${{ env.TELEGRAM_USER_ID }}
       run: |
         RUN_ID="${{ github.run_id }}"
+        echo "::add-mask::$RUN_ID"
 
         # Use HTML format - much simpler than MarkdownV2!
         MESSAGE="🚀 <b>${{ github.event.inputs.image }} is Now Live!</b>%0A%0A"
@@ -189,9 +193,7 @@ jobs:
         MESSAGE+="🆔 <b>Run ID:</b> <code>${RUN_ID}</code>"
         INLINE_KEYBOARD='{"inline_keyboard":[[{"text":"Cancel","callback_data":"'"$RUN_ID"'"}]]}'
 
-        echo "Sending message to Telegram..."
-        echo "Chat ID: $TELEGRAM_USER_ID"
-        echo "Run ID: $RUN_ID"
+        echo "Sending credentials to Telegram..."
 
         RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
           -d "chat_id=$TELEGRAM_USER_ID" \
@@ -199,15 +201,18 @@ jobs:
           -d "parse_mode=HTML" \
           -d "reply_markup=$INLINE_KEYBOARD")
 
-        echo "Telegram API Response:"
-        echo "$RESPONSE"
-
-        # Check if message was sent successfully
+        # Check if message was sent successfully (without printing response)
         if echo "$RESPONSE" | grep -q '"ok":true'; then
           echo "✅ Message sent successfully!"
         else
           echo "❌ Failed to send message!"
-          echo "$RESPONSE" | grep -o '"description":"[^"]*"' || echo "No error description available"
+          # Extract only the error description, not the full response
+          ERROR_DESC=$(echo "$RESPONSE" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
+          if [ -n "$ERROR_DESC" ]; then
+            echo "Error: $ERROR_DESC"
+          else
+            echo "No error description available"
+          fi
           exit 1
         fi
 
@@ -244,21 +249,21 @@ jobs:
       run: |
         RUN_ID="${{ github.run_id }}"
         REPO="${{ github.repository }}"
+        echo "::add-mask::$RUN_ID"
+        echo "::add-mask::$REPO"
 
         ERROR_MESSAGE="❌ <b>Deployment Failed</b>%0A%0A"
         ERROR_MESSAGE+="🆔 <b>Run ID:</b> <code>$RUN_ID</code>%0A"
         ERROR_MESSAGE+="🔗 <b>Logs:</b> <a href=\"https://github.com/$REPO/actions/runs/$RUN_ID\">View Details</a>"
 
-        echo "Sending error notification to Telegram..."
+        echo "Sending error notification..."
 
         RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
           -d "chat_id=$TELEGRAM_USER_ID" \
           -d "text=$ERROR_MESSAGE" \
           -d "parse_mode=HTML")
 
-        echo "Telegram API Response:"
-        echo "$RESPONSE"
-
+        # Check without printing full response
         if echo "$RESPONSE" | grep -q '"ok":true'; then
           echo "✅ Error notification sent!"
         else
