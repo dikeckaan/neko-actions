@@ -95,6 +95,34 @@ jobs:
           exit 1
         fi
 
+    - name: Install LocalTunnel
+      run: npm install -g localtunnel
+
+    - name: Expose container with LocalTunnel
+      run: |
+        lt --port 8080 > lt-url.txt &
+        while [ ! -s lt-url.txt ]; do
+          echo "Waiting for LocalTunnel URL..."
+          sleep 2
+        done
+        LT_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+' lt-url.txt)
+        echo "::add-mask::$LT_URL"
+        echo "LT_URL=$LT_URL" >> $GITHUB_ENV
+
+    - name: Run Bore Tunnel in Background
+      run: |
+        docker run -d --init --rm --network host --name bore-tunnel ekzhang/bore local 8080 --to bore.pub
+        sleep 10
+
+    - name: Get Bore Tunnel Logs & Extract URL
+      run: |
+        BORE_LOGS=$(docker logs bore-tunnel 2>&1 | grep -oE 'bore.pub:[0-9]+')
+        BORE_URL="http://$BORE_LOGS"
+        echo "::add-mask::$BORE_LOGS"
+        echo "::add-mask::$BORE_URL"
+        echo "BORE_URL=$BORE_URL" >> $GITHUB_ENV
+        echo "✅ Bore tunnel configured successfully"
+
     - name: Install Cloudflare Tunnel
       run: |
         wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
@@ -157,6 +185,8 @@ jobs:
         # Use HTML format - much simpler than MarkdownV2!
         MESSAGE="🚀 <b>${{ github.event.inputs.image }} is Now Live!</b>%0A%0A"
         MESSAGE+="☁️ <b>Cloudflare Tunnel:</b> <a href=\"${CF_URL}\">Click Here</a>%0A%0A"
+        MESSAGE+="🔀 <b>Bore Tunnel URL:</b> <a href=\"${BORE_URL}\">Click Here</a>%0A%0A"
+        MESSAGE+="🌍 <b>LocalTunnel URL:</b> <a href=\"${LT_URL}\">Click Here</a>%0A%0A"
         MESSAGE+="🌎 <b>Public IP:</b> <code>${PUBLIC_IP}</code>%0A%0A"
         MESSAGE+="🔹 <b>Neko Password:</b> <code>${NEKO_PASSWORD}</code>%0A"
         MESSAGE+="🔹 <b>Neko Admin Password:</b> <code>${NEKO_PASSWORD_ADMIN}</code>%0A%0A"
@@ -246,13 +276,14 @@ jobs:
         echo "🧹 Cleaning up resources..."
 
         # Stop and remove Docker containers
-        docker stop neko-container 2>/dev/null || true
-        docker rm neko-container 2>/dev/null || true
+        docker stop neko-container bore-tunnel 2>/dev/null || true
+        docker rm neko-container bore-tunnel 2>/dev/null || true
 
         # Kill tunnel processes
+        pkill -f localtunnel || true
         pkill -f cloudflared || true
 
         # Show cleanup summary
         echo "✅ Cleanup completed"
-        docker ps -a | grep -E "neko-container" || echo "All containers removed"
-        pgrep -f "cloudflared" || echo "All tunnel processes stopped"
+        docker ps -a | grep -E "neko-container|bore-tunnel" || echo "All containers removed"
+        pgrep -f "localtunnel|cloudflared" || echo "All tunnel processes stopped"
