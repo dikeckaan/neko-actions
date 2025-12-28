@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+from html import escape as html_escape
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from dotenv import load_dotenv
@@ -103,6 +104,38 @@ def cancel_workflow_run(run_id: str) -> dict:
         logger.error(f"Error canceling workflow: {e}")
         return {"success": False, "message": f"❌ Network Error: {str(e)}"}
 
+def get_active_workflow_runs() -> dict:
+    """Get all active (in_progress) workflow runs."""
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    params = {
+        "status": "in_progress",
+        "per_page": 100
+    }
+
+    try:
+        logger.info(f"Fetching active runs from GitHub API: {url}")
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        logger.info(f"GitHub API response status: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        logger.info(f"Found {len(data.get('workflow_runs', []))} active runs")
+        return {"success": True, "runs": data.get("workflow_runs", [])}
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Timeout getting workflow runs: {e}")
+        return {"success": False, "message": "❌ Request timed out. GitHub API is slow."}
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP error getting workflow runs: {e}")
+        logger.error(f"Response content: {e.response.text if e.response else 'No response'}")
+        return {"success": False, "message": f"❌ HTTP Error: {e.response.status_code}"}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error getting workflow runs: {e}")
+        return {"success": False, "message": f"❌ Network Error: {str(e)}"}
+
 async def start_browser(update: Update, context):
     """Handle browser start commands."""
     if not is_authorized(update.message.from_user.id):
@@ -195,6 +228,11 @@ async def help_command(update: Update, context):
         "• `/help` - Show this guide\n"
         "• `/actionslist` - List all browser commands\n\n"
 
+        "*Runner Management:*\n"
+        "• `/activerunners` - List all active runners\n"
+        "• `/stop <runner_id>` - Stop a specific runner\n"
+        "• `/killallrunners` - Stop all active runners\n\n"
+
         "*Instance Details:*\n"
         "• Runtime: Up to 6 hours\n"
         "• Access: Via Bore Tunnel or LocalTunnel\n"
@@ -227,6 +265,137 @@ async def actions_list(update: Update, context):
         "To stop a running instance, click the *Cancel* button on the deployment message."
     )
     await update.message.reply_text(response_text, parse_mode="Markdown")
+
+async def active_runners(update: Update, context):
+    """List all active (in_progress) workflow runs."""
+    if not is_authorized(update.message.from_user.id):
+        await update.message.reply_text("⛔ You are not authorized to use this bot.")
+        return
+
+    logger.info(f"User {update.message.from_user.id} requested active runners list")
+
+    try:
+        await update.message.reply_text("🔍 Fetching active runners...")
+
+        result = get_active_workflow_runs()
+
+        if not result["success"]:
+            await update.message.reply_text(result["message"])
+            return
+
+        runs = result["runs"]
+
+        if not runs:
+            await update.message.reply_text("✅ No active runners found.")
+            return
+
+        response_lines = ["🏃 <b>Active Runners:</b>\n"]
+        for run in runs:
+            run_id = run.get("id")
+            workflow_name = html_escape(run.get("name", "Unknown"))
+            created_at = html_escape(run.get("created_at", "Unknown"))
+            status = html_escape(run.get("status", "Unknown"))
+
+            response_lines.append(
+                f"• ID: <code>{run_id}</code>\n"
+                f"  Workflow: {workflow_name}\n"
+                f"  Status: {status}\n"
+                f"  Started: {created_at}\n"
+            )
+
+        response_text = "\n".join(response_lines)
+        response_text += f"\n<b>Total active runners:</b> {len(runs)}\n\n"
+        response_text += "Use <code>/stop &lt;runner_id&gt;</code> to stop a specific runner\n"
+        response_text += "Use <code>/killallrunners</code> to stop all runners"
+
+        await update.message.reply_text(response_text, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error in active_runners: {e}")
+        await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+
+async def kill_all_runners(update: Update, context):
+    """Cancel all active workflow runs."""
+    if not is_authorized(update.message.from_user.id):
+        await update.message.reply_text("⛔ You are not authorized to use this bot.")
+        return
+
+    logger.info(f"User {update.message.from_user.id} requested to kill all runners")
+
+    try:
+        await update.message.reply_text("🔍 Fetching active runners to stop...")
+
+        result = get_active_workflow_runs()
+
+        if not result["success"]:
+            await update.message.reply_text(result["message"])
+            return
+
+        runs = result["runs"]
+
+        if not runs:
+            await update.message.reply_text("✅ No active runners to stop.")
+            return
+
+        await update.message.reply_text(f"🛑 Stopping {len(runs)} active runner(s)...")
+
+        success_count = 0
+        failed_count = 0
+
+        for run in runs:
+            run_id = str(run.get("id"))
+            cancel_result = cancel_workflow_run(run_id)
+            if cancel_result["success"]:
+                success_count += 1
+            else:
+                failed_count += 1
+
+        summary_text = (
+            f"<b>Summary:</b>\n"
+            f"✅ Successfully stopped: {success_count}\n"
+            f"❌ Failed to stop: {failed_count}\n"
+            f"📊 Total: {len(runs)}"
+        )
+
+        await update.message.reply_text(summary_text, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error in kill_all_runners: {e}")
+        await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+
+async def stop_runner(update: Update, context):
+    """Stop a specific workflow run by ID."""
+    if not is_authorized(update.message.from_user.id):
+        await update.message.reply_text("⛔ You are not authorized to use this bot.")
+        return
+
+    try:
+        # Extract run_id from command arguments
+        if not context.args or len(context.args) == 0:
+            await update.message.reply_text(
+                "❌ Usage: <code>/stop &lt;runner_id&gt;</code>\n\n"
+                "Example: <code>/stop 1234567890</code>\n\n"
+                "Use <code>/activerunners</code> to see active runner IDs",
+                parse_mode="HTML"
+            )
+            return
+
+        run_id = context.args[0]
+
+        # Validate run_id is numeric
+        if not run_id.isdigit():
+            await update.message.reply_text("❌ Runner ID must be a number!")
+            return
+
+        logger.info(f"User {update.message.from_user.id} requested to stop runner {run_id}")
+        await update.message.reply_text(f"🛑 Stopping runner {run_id}...")
+
+        result = cancel_workflow_run(run_id)
+        await update.message.reply_text(result["message"])
+
+    except Exception as e:
+        logger.error(f"Error in stop_runner: {e}")
+        await update.message.reply_text(f"❌ An error occurred: {str(e)}")
 
 async def menu_callback_handler(update: Update, context):
     """Handle inline keyboard button clicks from the menu."""
@@ -284,6 +453,11 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("actionslist", actions_list))
+
+    # Add runner management commands
+    app.add_handler(CommandHandler("activerunners", active_runners))
+    app.add_handler(CommandHandler("killallrunners", kill_all_runners))
+    app.add_handler(CommandHandler("stop", stop_runner))
 
     # Add command handlers dynamically for all browsers
     for command in BROWSER_COMMANDS.keys():

@@ -59,6 +59,7 @@ Based on [m1k1o/neko](https://github.com/m1k1o/neko) - a self-hosted virtual bro
 - ❌ Error notifications with detailed logs
 - 📖 Built-in help system and command guide
 - 🎨 Clean HTML-formatted messages
+- 🔧 Runner management commands to monitor and control active deployments
 
 ---
 
@@ -358,6 +359,21 @@ curl https://telegram-bot.workers.dev/my-secret-xyz/health
 | `/start` | Show welcome menu with interactive buttons |
 | `/help` | Display detailed usage guide and troubleshooting |
 | `/actionslist` | List all available browser/desktop environments |
+
+### Runner Management Commands
+
+| Command | Description |
+|---------|-------------|
+| `/activerunners` | List all currently active GitHub Actions runners with details |
+| `/stop <runner_id>` | Stop a specific runner by its ID (get ID from `/activerunners`) |
+| `/killallrunners` | Stop all active runners at once |
+
+**Example usage:**
+```
+1. Check active runners:    /activerunners
+2. Stop a specific runner:   /stop 1234567890
+3. Stop all runners:         /killallrunners
+```
 
 ### Browser/Desktop Commands
 

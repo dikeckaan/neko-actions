@@ -373,6 +373,59 @@ async function cancelWorkflowRun(runId, env) {
 }
 
 /**
+ * Get all active (in_progress) workflow runs
+ */
+async function getActiveWorkflowRuns(env) {
+  const githubRepo = env.GITHUB_REPO || "dikeckaan/neko-actions";
+  const url = `https://api.github.com/repos/${githubRepo}/actions/runs?status=in_progress&per_page=100`;
+  const headers = {
+    "Accept": "application/vnd.github+json",
+    "Authorization": `Bearer ${env.GITHUB_TOKEN}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "Telegram-Bot-Cloudflare-Worker"
+  };
+
+  try {
+    console.log(`Fetching active runs from GitHub API: ${url}`);
+    const response = await fetch(url, {
+      method: "GET",
+      headers: headers,
+      signal: AbortSignal.timeout(30000) // 30 second timeout
+    });
+
+    console.log(`GitHub API response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Failed to get workflow runs: ${response.status} - ${errorText}`);
+      return {
+        success: false,
+        message: `❌ HTTP Error: ${response.status}`
+      };
+    }
+
+    const data = await response.json();
+    console.log(`Found ${data.workflow_runs?.length || 0} active runs`);
+    return {
+      success: true,
+      runs: data.workflow_runs || []
+    };
+  } catch (error) {
+    console.error("Error getting workflow runs:", error);
+    if (error.name === 'AbortError') {
+      return {
+        success: false,
+        message: "❌ Request timed out. GitHub API is slow."
+      };
+    }
+    return {
+      success: false,
+      message: `❌ Network Error: ${error.message}`
+    };
+  }
+}
+
+/**
  * Handle incoming messages
  */
 async function handleMessage(message, env) {
@@ -408,6 +461,15 @@ async function handleMessage(message, env) {
       break;
     case "actionslist":
       await handleActionsListCommand(message, env);
+      break;
+    case "activerunners":
+      await handleActiveRunnersCommand(message, env);
+      break;
+    case "killallrunners":
+      await handleKillAllRunnersCommand(message, env);
+      break;
+    case "stop":
+      await handleStopRunnerCommand(message, env);
       break;
     default:
       // Check if it's a browser command
@@ -453,7 +515,7 @@ async function handleStartCommand(message, env) {
 async function handleHelpCommand(message, env) {
   const githubRepo = env.GITHUB_REPO || "dikeckaan/neko-actions";
 
-  const helpText = `📖 *User Guide*\n\n*How to Use:*\n1️⃣ Choose a browser or desktop environment\n2️⃣ Send the command (e.g., \`/chrome\`)\n3️⃣ Wait for deployment (takes ~1-2 minutes)\n4️⃣ Receive connection details via message\n5️⃣ Click *Cancel* button to stop the instance\n\n*Available Commands:*\n• \`/start\` - Show welcome menu\n• \`/help\` - Show this guide\n• \`/actionslist\` - List all browser commands\n\n*Instance Details:*\n• Runtime: Up to 6 hours\n• Access: Via Cloudflare Tunnel, Bore or LocalTunnel\n• Auto-cleanup: Resources freed after stop\n• Health checks: Every 5 minutes\n\n*Troubleshooting:*\n❌ If deployment fails, you'll receive an error message\n🔄 Check GitHub Actions logs for details\n⏱️ Cancel button works immediately\n\n💡 *Repository:* [GitHub](https://github.com/${githubRepo})`;
+  const helpText = `📖 *User Guide*\n\n*How to Use:*\n1️⃣ Choose a browser or desktop environment\n2️⃣ Send the command (e.g., \`/chrome\`)\n3️⃣ Wait for deployment (takes ~1-2 minutes)\n4️⃣ Receive connection details via message\n5️⃣ Click *Cancel* button to stop the instance\n\n*Available Commands:*\n• \`/start\` - Show welcome menu\n• \`/help\` - Show this guide\n• \`/actionslist\` - List all browser commands\n\n*Runner Management:*\n• \`/activerunners\` - List all active runners\n• \`/stop <runner_id>\` - Stop a specific runner\n• \`/killallrunners\` - Stop all active runners\n\n*Instance Details:*\n• Runtime: Up to 6 hours\n• Access: Via Cloudflare Tunnel, Bore or LocalTunnel\n• Auto-cleanup: Resources freed after stop\n• Health checks: Every 5 minutes\n\n*Troubleshooting:*\n❌ If deployment fails, you'll receive an error message\n🔄 Check GitHub Actions logs for details\n⏱️ Cancel button works immediately\n\n💡 *Repository:* [GitHub](https://github.com/${githubRepo})`;
 
   await sendMessage(message.chat.id, helpText, env, {
     parse_mode: "Markdown",
@@ -495,6 +557,142 @@ async function handleBrowserCommand(message, command, env) {
 
   const finalResult = await sendMessage(chatId, result.message, env);
   console.log(`Final message status: ${finalResult.ok ? 'success' : 'failed'}`);
+}
+
+/**
+ * Handle /activerunners command
+ */
+async function handleActiveRunnersCommand(message, env) {
+  const chatId = message.chat.id;
+  console.log(`User ${message.from.id} requested active runners list`);
+
+  try {
+    await sendMessage(chatId, "🔍 Fetching active runners...", env);
+
+    const result = await getActiveWorkflowRuns(env);
+
+    if (!result.success) {
+      await sendMessage(chatId, result.message, env);
+      return;
+    }
+
+    const runs = result.runs;
+
+    if (!runs || runs.length === 0) {
+      await sendMessage(chatId, "✅ No active runners found.", env);
+      return;
+    }
+
+    let responseText = "🏃 *Active Runners:*\n\n";
+
+    for (const run of runs) {
+      const runId = run.id;
+      const workflowName = run.name || "Unknown";
+      const createdAt = run.created_at || "Unknown";
+      const status = run.status || "Unknown";
+
+      responseText += `• ID: \`${runId}\`\n`;
+      responseText += `  Workflow: ${workflowName}\n`;
+      responseText += `  Status: ${status}\n`;
+      responseText += `  Started: ${createdAt}\n\n`;
+    }
+
+    responseText += `*Total active runners:* ${runs.length}\n\n`;
+    responseText += "Use `/stop <runner_id>` to stop a specific runner\n";
+    responseText += "Use `/killallrunners` to stop all runners";
+
+    await sendMessage(chatId, responseText, env, { parse_mode: "Markdown" });
+  } catch (error) {
+    console.error("Error in handleActiveRunnersCommand:", error);
+    await sendMessage(chatId, `❌ An error occurred: ${error.message}`, env);
+  }
+}
+
+/**
+ * Handle /killallrunners command
+ */
+async function handleKillAllRunnersCommand(message, env) {
+  const chatId = message.chat.id;
+  console.log(`User ${message.from.id} requested to kill all runners`);
+
+  try {
+    await sendMessage(chatId, "🔍 Fetching active runners to stop...", env);
+
+    const result = await getActiveWorkflowRuns(env);
+
+    if (!result.success) {
+      await sendMessage(chatId, result.message, env);
+      return;
+    }
+
+    const runs = result.runs;
+
+    if (!runs || runs.length === 0) {
+      await sendMessage(chatId, "✅ No active runners to stop.", env);
+      return;
+    }
+
+    await sendMessage(chatId, `🛑 Stopping ${runs.length} active runner(s)...`, env);
+
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (const run of runs) {
+      const runId = String(run.id);
+      const cancelResult = await cancelWorkflowRun(runId, env);
+      if (cancelResult.success) {
+        successCount++;
+      } else {
+        failedCount++;
+      }
+    }
+
+    const summaryText = `*Summary:*\n✅ Successfully stopped: ${successCount}\n❌ Failed to stop: ${failedCount}\n📊 Total: ${runs.length}`;
+
+    await sendMessage(chatId, summaryText, env, { parse_mode: "Markdown" });
+  } catch (error) {
+    console.error("Error in handleKillAllRunnersCommand:", error);
+    await sendMessage(chatId, `❌ An error occurred: ${error.message}`, env);
+  }
+}
+
+/**
+ * Handle /stop command
+ */
+async function handleStopRunnerCommand(message, env) {
+  const chatId = message.chat.id;
+  const messageText = message.text || "";
+  const parts = messageText.split(" ");
+
+  try {
+    // Extract run_id from command arguments
+    if (parts.length < 2) {
+      await sendMessage(
+        chatId,
+        "❌ Usage: `/stop <runner_id>`\n\nExample: `/stop 1234567890`\n\nUse `/activerunners` to see active runner IDs",
+        env,
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
+    const runId = parts[1];
+
+    // Validate run_id is numeric
+    if (!/^\d+$/.test(runId)) {
+      await sendMessage(chatId, "❌ Runner ID must be a number!", env);
+      return;
+    }
+
+    console.log(`User ${message.from.id} requested to stop runner ${runId}`);
+    await sendMessage(chatId, `🛑 Stopping runner ${runId}...`, env);
+
+    const result = await cancelWorkflowRun(runId, env);
+    await sendMessage(chatId, result.message, env);
+  } catch (error) {
+    console.error("Error in handleStopRunnerCommand:", error);
+    await sendMessage(chatId, `❌ An error occurred: ${error.message}`, env);
+  }
 }
 
 /**
