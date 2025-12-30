@@ -54,7 +54,6 @@ htmlcov/
 
 # Cloudflare Workers
 .dev.vars
-wrangler.toml
 node_modules/
 .wrangler/
 worker-configuration.d.ts

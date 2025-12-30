@@ -1,0 +1,25 @@
+name = "neko-actions-bot"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Account details (fill these in from your Cloudflare dashboard)
+# account_id = "your_account_id_here"
+
+# KV Namespaces (optional, for future use)
+# [[kv_namespaces]]
+# binding = "STORAGE"
+# id = "your_kv_namespace_id"
+
+# Environment variables (configure in Cloudflare Dashboard or use .dev.vars for local)
+# These are just placeholders - actual values should be set in Cloudflare Dashboard
+# [vars]
+# GITHUB_REPO = "dikeckaan/neko-actions"
+# WORKFLOW_NAME = "telegram-bot.yml"
+# GITHUB_BRANCH = "improvements"
+
+# Secrets (configure these in Cloudflare Dashboard with encryption)
+# wrangler secret put TELEGRAM_BOT_TOKEN
+# wrangler secret put GITHUB_TOKEN
+# wrangler secret put ALLOWED_USER_IDS
+# wrangler secret put SECRET_PATH
+# wrangler secret put CLOUDFLARE_TUNNEL_TOKEN (optional)

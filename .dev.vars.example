@@ -1,0 +1,15 @@
+# Local development environment variables
+# Copy this file to .dev.vars and fill in your actual values
+# .dev.vars is automatically gitignored
+
+# Required Variables
+TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
+GITHUB_TOKEN=your_github_personal_access_token
+ALLOWED_USER_IDS=123456789,987654321
+SECRET_PATH=your-unique-secret-path-123
+
+# Optional Variables
+GITHUB_REPO=dikeckaan/neko-actions
+WORKFLOW_NAME=telegram-bot.yml
+GITHUB_BRANCH=improvements
+CLOUDFLARE_TUNNEL_TOKEN=your_cloudflare_tunnel_token
