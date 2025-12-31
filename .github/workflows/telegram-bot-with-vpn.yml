@@ -54,46 +54,73 @@ jobs:
 
         docker run -d \
           --name warp \
-          --privileged \
-          --restart=always \
           --network neko-network \
           --cap-add NET_ADMIN \
-          --sysctl net.ipv6.conf.all.disable_ipv6=0 \
-          -e WARP_SLEEP=2 \
-          -v /lib/modules:/lib/modules \
-          e1732a04/warp-socks:latest
+          --sysctl net.ipv4.ip_forward=1 \
+          caomingjun/warp:latest
 
-        echo "⏳ Waiting for WARP connection to establish..."
-        sleep 30
+        echo "✅ WARP container started"
 
-        # Check WARP status
-        echo "Checking WARP container logs..."
-        docker logs warp 2>&1 | tail -30
+    - name: Setup WARP NAT (iptables routing)
+      run: |
+        echo "🔧 Setting up NAT routing for WARP..."
+
+        docker run -d \
+          --name warp-nat \
+          --network container:warp \
+          --cap-add NET_ADMIN \
+          alpine:3.20 \
+          sh -c '
+            apk add --no-cache iptables >/dev/null &&
+            echo "⏳ Waiting for CloudflareWARP interface..." &&
+            until ip link show CloudflareWARP >/dev/null 2>&1; do sleep 1; done;
+            echo "✅ CloudflareWARP interface detected" &&
+            iptables -t nat -A POSTROUTING -o CloudflareWARP -j MASQUERADE &&
+            iptables -A FORWARD -i eth0 -o CloudflareWARP -j ACCEPT &&
+            iptables -A FORWARD -i CloudflareWARP -o eth0 -m state --state ESTABLISHED,RELATED -j ACCEPT &&
+            iptables -P FORWARD ACCEPT &&
+            echo "✅ NAT rules applied" &&
+            tail -f /dev/null
+          '
+
+        echo "⏳ Waiting for NAT setup to complete..."
+        sleep 15
+
+        # Check if NAT container is running
+        if docker ps | grep -q warp-nat; then
+          echo "✅ WARP NAT container is running"
+          docker logs warp-nat 2>&1 | tail -10
+        else
+          echo "❌ WARP NAT container failed"
+          docker logs warp-nat
+          exit 1
+        fi
 
     - name: Verify WARP Connection
       run: |
-        echo "🌍 Checking WARP IP address..."
+        echo "🌍 Verifying WARP routing..."
 
         # Get host IP first
         HOST_IP=$(curl -s https://api.ipify.org)
         echo "::add-mask::$HOST_IP"
         echo "HOST IP: $HOST_IP"
 
-        # Wait for WARP proxy to be ready (retry mechanism)
-        echo "⏳ Waiting for WARP SOCKS5 proxy to be ready..."
-        MAX_RETRIES=30
+        # Test routing through WARP (using WARP's network namespace)
+        echo "Testing connection through WARP routing..."
+        MAX_RETRIES=20
         RETRY_COUNT=0
         WARP_IP=""
 
         while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
           echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES..."
 
-          WARP_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
+          # Run curl in WARP's network namespace to test the routing
+          WARP_IP=$(docker run --rm --network container:warp curlimages/curl:latest \
             --connect-timeout 5 --max-time 10 \
-            --socks5 warp:1080 https://api.ipify.org 2>/dev/null || echo "")
+            https://api.ipify.org 2>/dev/null || echo "")
 
           if [ -n "$WARP_IP" ] && [ "$WARP_IP" != "failed" ]; then
-            echo "✅ WARP proxy is ready!"
+            echo "✅ WARP routing is working!"
             break
           fi
 
@@ -102,9 +129,15 @@ jobs:
         done
 
         if [ -z "$WARP_IP" ]; then
-          echo "❌ Failed to connect to WARP proxy after $MAX_RETRIES attempts"
-          echo "Checking WARP container logs:"
-          docker logs warp --tail 50
+          echo "❌ Failed to verify WARP routing after $MAX_RETRIES attempts"
+          echo "Checking WARP container status:"
+          docker ps --filter name=warp
+          echo ""
+          echo "WARP logs:"
+          docker logs warp --tail 30
+          echo ""
+          echo "WARP NAT logs:"
+          docker logs warp-nat --tail 30
           exit 1
         fi
 
@@ -117,7 +150,7 @@ jobs:
           echo "   Host IP: $HOST_IP"
           echo "   WARP IP: $WARP_IP"
         else
-          echo "⚠️ Warning: WARP IP matches host IP, VPN might not be working"
+          echo "⚠️ Warning: WARP IP matches host IP, routing might not be working correctly"
         fi
 
     - name: Pull and Run m1k1o/neko container
@@ -146,8 +179,7 @@ jobs:
 
         echo "Using image: $DOCKER_IMAGE"
 
-        # Run container with WARP SOCKS5 proxy
-        # e1732a04/warp-socks provides SOCKS5 on port 1080
+        # Run Neko container on the same network as WARP
         docker run -d \
           --name neko-container \
           --network neko-network \
@@ -155,52 +187,94 @@ jobs:
           --shm-size="2gb" \
           -e NEKO_PASSWORD=$NEKO_PASSWORD \
           -e NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN \
-          -e ALL_PROXY=socks5://warp:1080 \
-          -e all_proxy=socks5://warp:1080 \
           -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
           -p 8080:8080 \
           -p 52000-52100:52000-52100/udp \
           "$DOCKER_IMAGE"
 
-        echo "✅ Neko container started with WARP proxy configuration"
+        echo "✅ Neko container started"
+
+    - name: Route Neko Traffic Through WARP
+      run: |
+        echo "🔀 Routing Neko traffic through WARP..."
+
+        # Get WARP container IP in the shared network
+        WARP_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' warp)
+        echo "WARP container IP: $WARP_IP"
+
+        # Setup routing in Neko's network namespace
+        docker run -d \
+          --name neko-route \
+          --network container:neko-container \
+          --cap-add NET_ADMIN \
+          alpine:3.20 \
+          sh -c "
+            apk add --no-cache iproute2 >/dev/null &&
+            echo '⏳ Waiting for network interface...' &&
+            until ip link show eth0 >/dev/null 2>&1; do sleep 1; done;
+            echo '✅ Network interface ready' &&
+            ip route replace default via $WARP_IP dev eth0 &&
+            echo '✅ Default route set to WARP' &&
+            ip route show &&
+            tail -f /dev/null
+          "
+
+        echo "⏳ Waiting for routing setup..."
+        sleep 5
+
+        # Verify route container is running
+        if docker ps | grep -q neko-route; then
+          echo "✅ Neko routing container is running"
+          docker logs neko-route 2>&1 | tail -10
+        else
+          echo "❌ Neko routing container failed"
+          docker logs neko-route
+          exit 1
+        fi
+
+        echo "✅ Neko traffic is now routed through WARP"
 
     - name: Verify Neko is Behind WARP
       run: |
-        echo "🔍 Verifying Neko is using WARP..."
+        echo "🔍 Verifying Neko is using WARP routing..."
         sleep 10
 
-        # Check if containers are running
-        if docker ps | grep -q neko-container; then
-          echo "✅ Neko container is running"
-          docker ps --filter name=neko-container
-        else
-          echo "❌ Neko container failed to start"
-          docker logs neko-container
-          exit 1
-        fi
+        # Check if all containers are running
+        echo "Checking container status..."
+        CONTAINERS=("neko-container" "neko-route" "warp" "warp-nat")
+        for container in "${CONTAINERS[@]}"; do
+          if docker ps | grep -q "$container"; then
+            echo "✅ $container is running"
+          else
+            echo "❌ $container is not running"
+            docker ps -a --filter name="$container"
+            docker logs "$container" 2>&1 | tail -20
+            exit 1
+          fi
+        done
 
-        if docker ps | grep -q warp; then
-          echo "✅ WARP container is running"
-        else
-          echo "❌ WARP container failed to start"
-          docker logs warp
-          exit 1
-        fi
+        # Test that Neko's traffic goes through WARP
+        echo ""
+        echo "Testing Neko's external IP (should match WARP IP)..."
+        NEKO_IP=$(docker exec neko-container wget -qO- https://api.ipify.org 2>/dev/null || echo "failed")
 
-        # Test proxy connectivity
-        echo "Testing WARP SOCKS5 proxy..."
-        TEST_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
-          --connect-timeout 5 --max-time 10 \
-          --socks5 warp:1080 https://api.ipify.org 2>/dev/null || echo "failed")
-
-        if [ "$TEST_IP" != "failed" ] && [ -n "$TEST_IP" ]; then
-          echo "✅ WARP proxy is working correctly"
-          echo "   Proxy IP: $TEST_IP"
+        if [ "$NEKO_IP" = "failed" ] || [ -z "$NEKO_IP" ]; then
+          echo "⚠️ Could not verify Neko's external IP"
+          echo "Checking route configuration:"
+          docker exec neko-route ip route 2>&1 || true
         else
-          echo "⚠️ Could not verify WARP proxy"
+          echo "✅ Neko external IP: $NEKO_IP"
+          echo "✅ WARP IP (from earlier): $VPN_IP"
+
+          if [ "$NEKO_IP" = "$VPN_IP" ]; then
+            echo "✅ SUCCESS! Neko is routing through WARP!"
+          else
+            echo "⚠️ Warning: IPs don't match, routing might not be working"
+          fi
         fi
 
         # Show Neko logs
+        echo ""
         echo "Neko container logs:"
         docker logs neko-container --tail 20
 
@@ -303,16 +377,15 @@ jobs:
         END_TIME=$((SECONDS + 21600))  # 6 hours from now
 
         while [ $SECONDS -lt $END_TIME ]; do
-          # Check if containers are still running
-          if ! docker ps | grep -q neko-container; then
-            echo "⚠️ Neko container stopped unexpectedly!"
-            exit 1
-          fi
-
-          if ! docker ps | grep -q warp; then
-            echo "⚠️ WARP container stopped unexpectedly!"
-            exit 1
-          fi
+          # Check if all critical containers are still running
+          CRITICAL_CONTAINERS=("neko-container" "neko-route" "warp" "warp-nat")
+          for container in "${CRITICAL_CONTAINERS[@]}"; do
+            if ! docker ps | grep -q "$container"; then
+              echo "⚠️ $container stopped unexpectedly!"
+              docker logs "$container" 2>&1 | tail -30
+              exit 1
+            fi
+          done
 
           # Health check
           if curl -sf http://localhost:8080 > /dev/null 2>&1; then
@@ -322,9 +395,9 @@ jobs:
           fi
 
           # WARP connection check
-          WARP_STATUS=$(docker run --rm --network neko-network curlimages/curl:latest \
+          WARP_STATUS=$(docker run --rm --network container:warp curlimages/curl:latest \
             --connect-timeout 5 --max-time 10 \
-            --socks5 warp:1080 https://api.ipify.org 2>/dev/null || echo "failed")
+            https://api.ipify.org 2>/dev/null || echo "failed")
           if [ "$WARP_STATUS" != "failed" ] && [ -n "$WARP_STATUS" ]; then
             echo "✅ WARP still connected: $WARP_STATUS"
           else
@@ -371,11 +444,20 @@ jobs:
       run: |
         echo "🧹 Cleaning up resources..."
 
-        # Stop and remove Docker containers
+        # Stop and remove Docker containers in correct order
+        # First stop containers that use other containers' network namespaces
+        echo "Stopping routing containers..."
+        docker stop neko-route 2>/dev/null || true
+        docker stop warp-nat 2>/dev/null || true
+
+        # Then stop main containers
+        echo "Stopping main containers..."
         docker stop neko-container 2>/dev/null || true
-        docker rm neko-container 2>/dev/null || true
         docker stop warp 2>/dev/null || true
-        docker rm warp 2>/dev/null || true
+
+        # Remove all containers
+        echo "Removing containers..."
+        docker rm neko-route neko-container warp-nat warp 2>/dev/null || true
 
         # Remove network
         docker network rm neko-network 2>/dev/null || true
@@ -385,5 +467,5 @@ jobs:
 
         # Show cleanup summary
         echo "✅ Cleanup completed"
-        docker ps -a | grep -E "neko-container|warp" || echo "All containers removed"
+        docker ps -a | grep -E "neko-|warp" || echo "All containers removed"
         pgrep -f "cloudflared" || echo "All tunnel processes stopped"
