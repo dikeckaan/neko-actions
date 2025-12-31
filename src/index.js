@@ -13,7 +13,7 @@
  * Environment Variables Optional:
  * - GITHUB_REPO: GitHub repository (default: dikeckaan/neko-actions)
  * - WORKFLOW_NAME: Workflow file name (default: telegram-bot.yml)
- * - GITHUB_BRANCH: Target branch (default: improvements)
+ * - GITHUB_BRANCH: Target branch (default: master)
  * - CLOUDFLARE_TUNNEL_TOKEN: Optional Cloudflare tunnel token
  */
 
