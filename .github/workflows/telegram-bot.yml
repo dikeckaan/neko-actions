@@ -76,6 +76,8 @@ jobs:
           --shm-size="2gb" \
           -e NEKO_PASSWORD=$NEKO_PASSWORD \
           -e NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN \
+          -e NEKO_ICESERVERS='[{"urls":["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302"]}]' \
+          -e NEKO_ICELITE=false \
           -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
           -p 8080:8080 \
           -p 52000-52100:52000-52100/udp \
