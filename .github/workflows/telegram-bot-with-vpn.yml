@@ -158,12 +158,6 @@ jobs:
         IMAGE_NAME="${{ github.event.inputs.image }}"
         echo "::add-mask::$IMAGE_NAME"
 
-        # Get public IP for NAT configuration
-        PUBLIC_IP=$(curl -s -4 ifconfig.me)
-        echo "::add-mask::$PUBLIC_IP"
-        echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-        echo "Public IP for NAT1TO1: $PUBLIC_IP"
-
         # Try GitHub Container Registry first (ghcr.io)
         GHCR_IMAGE="ghcr.io/m1k1o/neko/${IMAGE_NAME}"
         DOCKERHUB_IMAGE="m1k1o/neko:${IMAGE_NAME}"
@@ -185,7 +179,7 @@ jobs:
 
         echo "Using image: $DOCKER_IMAGE"
 
-        # Run Neko container with NAT1TO1 and enhanced ICE configuration
+        # Run Neko container on the same network as WARP
         docker run -d \
           --name neko-container \
           --network neko-network \
@@ -193,18 +187,12 @@ jobs:
           --shm-size="2gb" \
           -e NEKO_PASSWORD=$NEKO_PASSWORD \
           -e NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN \
-          -e NEKO_ICESERVERS='[{"urls":["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302"]}]' \
-          -e NEKO_ICELITE=false \
-          -e NEKO_NAT1TO1=$PUBLIC_IP \
-          -e NEKO_ICEUDP=true \
-          -e NEKO_ICETCP=true \
           -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
           -p 8080:8080 \
           -p 52000-52100:52000-52100/udp \
-          -p 52000-52100:52000-52100/tcp \
           "$DOCKER_IMAGE"
 
-        echo "✅ Neko started with NAT1TO1=$PUBLIC_IP"
+        echo "✅ Neko container started"
 
     - name: Route Neko Traffic Through WARP
       run: |
