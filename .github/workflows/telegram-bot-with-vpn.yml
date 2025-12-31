@@ -80,10 +80,34 @@ jobs:
         echo "::add-mask::$HOST_IP"
         echo "HOST IP: $HOST_IP"
 
-        # Check IP through WARP SOCKS proxy
-        # caomingjun/warp provides SOCKS5 proxy on port 40000
-        WARP_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
-          --socks5 warp:40000 https://api.ipify.org)
+        # Wait for WARP proxy to be ready (retry mechanism)
+        echo "⏳ Waiting for WARP SOCKS5 proxy to be ready..."
+        MAX_RETRIES=30
+        RETRY_COUNT=0
+        WARP_IP=""
+
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES..."
+
+          WARP_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
+            --connect-timeout 5 --max-time 10 \
+            --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "")
+
+          if [ -n "$WARP_IP" ] && [ "$WARP_IP" != "failed" ]; then
+            echo "✅ WARP proxy is ready!"
+            break
+          fi
+
+          RETRY_COUNT=$((RETRY_COUNT + 1))
+          sleep 2
+        done
+
+        if [ -z "$WARP_IP" ]; then
+          echo "❌ Failed to connect to WARP proxy after $MAX_RETRIES attempts"
+          echo "Checking WARP container logs:"
+          docker logs warp --tail 50
+          exit 1
+        fi
 
         echo "::add-mask::$WARP_IP"
         echo "VPN_IP=$WARP_IP" >> $GITHUB_ENV
@@ -171,9 +195,10 @@ jobs:
         # Test proxy connectivity
         echo "Testing WARP SOCKS5 proxy..."
         TEST_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
+          --connect-timeout 5 --max-time 10 \
           --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "failed")
 
-        if [ "$TEST_IP" != "failed" ]; then
+        if [ "$TEST_IP" != "failed" ] && [ -n "$TEST_IP" ]; then
           echo "✅ WARP proxy is working correctly"
           echo "   Proxy IP: $TEST_IP"
         else
@@ -303,8 +328,9 @@ jobs:
 
           # WARP connection check
           WARP_STATUS=$(docker run --rm --network neko-network curlimages/curl:latest \
-            --connect-timeout 5 --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "failed")
-          if [ "$WARP_STATUS" != "failed" ]; then
+            --connect-timeout 5 --max-time 10 \
+            --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "failed")
+          if [ "$WARP_STATUS" != "failed" ] && [ -n "$WARP_STATUS" ]; then
             echo "✅ WARP still connected: $WARP_STATUS"
           else
             echo "⚠️ WARP connection check failed at $(date)"
