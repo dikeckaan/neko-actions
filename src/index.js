@@ -320,9 +320,18 @@ async function triggerWorkflow(chatId, image, useVPN, env) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`GitHub API error: ${response.status} - ${errorText}`);
+
+      // Prepare detailed error message
+      let errorMessage = `❌ HTTP Error: ${response.status}\n\n`;
+      errorMessage += `📄 Workflow: ${workflowName}\n`;
+      errorMessage += `🌿 Branch: ${branch}\n`;
+      errorMessage += `📦 Repo: ${githubRepo}\n`;
+      errorMessage += `🔗 URL: ${url}\n\n`;
+      errorMessage += `📋 Details:\n${errorText.substring(0, 300)}`;
+
       return {
         success: false,
-        message: `❌ HTTP Error: ${response.status}\n${errorText.substring(0, 200)}`
+        message: errorMessage
       };
     }
 
