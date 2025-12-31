@@ -286,7 +286,7 @@ async function triggerWorkflow(chatId, image, useVPN, env) {
     ? "telegram-bot-with-vpn.yml"
     : (env.WORKFLOW_NAME || "telegram-bot.yml");
 
-  const branch = env.GITHUB_BRANCH || "improvements";
+  const branch = env.GITHUB_BRANCH || "master";
   const cfToken = env.CLOUDFLARE_TUNNEL_TOKEN || "";
 
   console.log(`Using workflow: ${workflowName} (VPN: ${useVPN})`);
