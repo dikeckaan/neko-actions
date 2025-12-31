@@ -15,7 +15,7 @@ compatibility_date = "2024-01-01"
 # [vars]
 # GITHUB_REPO = "dikeckaan/neko-actions"
 # WORKFLOW_NAME = "telegram-bot.yml"
-# GITHUB_BRANCH = "improvements"
+# GITHUB_BRANCH = "master"
 
 # Secrets (configure these in Cloudflare Dashboard with encryption)
 # wrangler secret put TELEGRAM_BOT_TOKEN
