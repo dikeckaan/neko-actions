@@ -1,0 +1,368 @@
+name: Neko Docker Telegram Bot (VPN Protected)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chatid:
+        description: "Chat ID"
+        required: true
+      image:
+        description: "Image to use"
+        required: true
+      bottoken:
+        description: "Telegram Bot Token"
+        required: true
+      cloudflaretoken:
+        description: "Cloudflare Tunnel Token (optional)"
+        required: false
+        default: ""
+
+jobs:
+  run-neko-docker:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Generate Random Passwords
+      run: |
+        NEKO_PASSWORD=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
+        NEKO_PASSWORD_ADMIN=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)
+        echo "::add-mask::$NEKO_PASSWORD"
+        echo "::add-mask::$NEKO_PASSWORD_ADMIN"
+        echo "NEKO_PASSWORD=$NEKO_PASSWORD" >> $GITHUB_ENV
+        echo "NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN" >> $GITHUB_ENV
+
+    - name: Mask Sensitive Inputs
+      run: |
+        echo "::add-mask::${{ github.event.inputs.bottoken }}"
+        echo "::add-mask::${{ github.event.inputs.chatid }}"
+        echo "::add-mask::${{ github.event.inputs.cloudflaretoken }}"
+        echo "TELEGRAM_BOT_TOKEN=${{ github.event.inputs.bottoken }}" >> $GITHUB_ENV
+        echo "TELEGRAM_USER_ID=${{ github.event.inputs.chatid }}" >> $GITHUB_ENV
+        echo "CLOUDFLARE_TUNNEL_TOKEN=${{ github.event.inputs.cloudflaretoken }}" >> $GITHUB_ENV
+
+    - name: Create Docker Network
+      run: |
+        docker network create neko-network
+        echo "✅ Docker network created"
+
+    - name: Start Cloudflare WARP Container
+      run: |
+        echo "🔐 Starting Cloudflare WARP container..."
+
+        docker run -d \
+          --name warp \
+          --privileged \
+          --restart=always \
+          --network neko-network \
+          -v /lib/modules:/lib/modules \
+          caomingjun/warp:latest
+
+        echo "⏳ Waiting for WARP connection to establish..."
+        sleep 20
+
+        # Check WARP status
+        if docker logs warp 2>&1 | grep -qE "Successfully registered|Connected|Registration success"; then
+          echo "✅ WARP connected successfully"
+        else
+          echo "ℹ️ Checking WARP logs..."
+          docker logs warp | tail -20
+        fi
+
+    - name: Verify WARP Connection
+      run: |
+        echo "🌍 Checking WARP IP address..."
+
+        # Get host IP first
+        HOST_IP=$(curl -s https://api.ipify.org)
+        echo "::add-mask::$HOST_IP"
+        echo "HOST IP: $HOST_IP"
+
+        # Check IP through WARP SOCKS proxy
+        # caomingjun/warp provides SOCKS5 proxy on port 40000
+        WARP_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
+          --socks5 warp:40000 https://api.ipify.org)
+
+        echo "::add-mask::$WARP_IP"
+        echo "VPN_IP=$WARP_IP" >> $GITHUB_ENV
+        echo "✅ WARP IP: $WARP_IP"
+
+        if [ "$WARP_IP" != "$HOST_IP" ]; then
+          echo "✅ WARP is working! IPs are different."
+          echo "   Host IP: $HOST_IP"
+          echo "   WARP IP: $WARP_IP"
+        else
+          echo "⚠️ Warning: WARP IP matches host IP, VPN might not be working"
+        fi
+
+    - name: Pull and Run m1k1o/neko container
+      run: |
+        IMAGE_NAME="${{ github.event.inputs.image }}"
+        echo "::add-mask::$IMAGE_NAME"
+
+        # Try GitHub Container Registry first (ghcr.io)
+        GHCR_IMAGE="ghcr.io/m1k1o/neko/${IMAGE_NAME}"
+        DOCKERHUB_IMAGE="m1k1o/neko:${IMAGE_NAME}"
+
+        echo "Attempting to pull from GitHub Container Registry..."
+        if docker pull "$GHCR_IMAGE"; then
+          echo "✅ Successfully pulled from ghcr.io"
+          DOCKER_IMAGE="$GHCR_IMAGE"
+        else
+          echo "⚠️ Failed to pull from ghcr.io, trying Docker Hub..."
+          if docker pull "$DOCKERHUB_IMAGE"; then
+            echo "✅ Successfully pulled from Docker Hub"
+            DOCKER_IMAGE="$DOCKERHUB_IMAGE"
+          else
+            echo "❌ Failed to pull image from both registries"
+            exit 1
+          fi
+        fi
+
+        echo "Using image: $DOCKER_IMAGE"
+
+        # Run container with WARP SOCKS5 proxy
+        # caomingjun/warp provides SOCKS5 on port 40000
+        docker run -d \
+          --name neko-container \
+          --network neko-network \
+          --cap-add=SYS_ADMIN \
+          --shm-size="2gb" \
+          -e NEKO_PASSWORD=$NEKO_PASSWORD \
+          -e NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN \
+          -e ALL_PROXY=socks5://warp:40000 \
+          -e HTTP_PROXY=http://warp:40001 \
+          -e HTTPS_PROXY=http://warp:40001 \
+          -e all_proxy=socks5://warp:40000 \
+          -e http_proxy=http://warp:40001 \
+          -e https_proxy=http://warp:40001 \
+          -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
+          -p 8080:8080 \
+          -p 52000-52100:52000-52100/udp \
+          "$DOCKER_IMAGE"
+
+        echo "✅ Neko container started with WARP proxy configuration"
+
+    - name: Verify Neko is Behind WARP
+      run: |
+        echo "🔍 Verifying Neko is using WARP..."
+        sleep 10
+
+        # Check if containers are running
+        if docker ps | grep -q neko-container; then
+          echo "✅ Neko container is running"
+          docker ps --filter name=neko-container
+        else
+          echo "❌ Neko container failed to start"
+          docker logs neko-container
+          exit 1
+        fi
+
+        if docker ps | grep -q warp; then
+          echo "✅ WARP container is running"
+        else
+          echo "❌ WARP container failed to start"
+          docker logs warp
+          exit 1
+        fi
+
+        # Test proxy connectivity
+        echo "Testing WARP SOCKS5 proxy..."
+        TEST_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
+          --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "failed")
+
+        if [ "$TEST_IP" != "failed" ]; then
+          echo "✅ WARP proxy is working correctly"
+          echo "   Proxy IP: $TEST_IP"
+        else
+          echo "⚠️ Could not verify WARP proxy"
+        fi
+
+        # Show Neko logs
+        echo "Neko container logs:"
+        docker logs neko-container --tail 20
+
+    - name: Install Cloudflare Tunnel
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        cloudflared --version
+
+    - name: Run Cloudflare Tunnel
+      run: |
+        CF_TOKEN="${{ env.CLOUDFLARE_TUNNEL_TOKEN }}"
+
+        if [ -n "$CF_TOKEN" ]; then
+          # Named tunnel with token
+          echo "Starting named Cloudflare Tunnel (bypassing VPN)..."
+          nohup cloudflared tunnel run --token "$CF_TOKEN" > cf-tunnel.log 2>&1 &
+          sleep 10
+
+          # Extract URL from logs (named tunnels show their URL)
+          CF_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com|https://[a-zA-Z0-9.-]+\.[a-z]+' cf-tunnel.log | head -1)
+
+          if [ -z "$CF_URL" ]; then
+            echo "⚠️ Could not extract named tunnel URL, using placeholder"
+            CF_URL="https://your-tunnel.cfargotunnel.com"
+          fi
+        else
+          # Quick tunnel (random domain)
+          echo "Starting quick Cloudflare Tunnel (bypassing VPN)..."
+          nohup cloudflared tunnel --url http://localhost:8080 > cf-tunnel.log 2>&1 &
+          sleep 10
+
+          # Extract URL from quick tunnel logs
+          CF_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' cf-tunnel.log | head -1)
+
+          if [ -z "$CF_URL" ]; then
+            echo "⚠️ Could not extract quick tunnel URL"
+            CF_URL="https://unavailable.trycloudflare.com"
+          fi
+        fi
+
+        echo "::add-mask::$CF_URL"
+        echo "CF_URL=$CF_URL" >> $GITHUB_ENV
+        echo "✅ Cloudflare tunnel configured successfully (VPN bypass enabled)"
+
+    - name: Get IP Addresses
+      run: |
+        PRIVATE_IP=$(hostname -I | awk '{print $1}')
+        PUBLIC_IP=$(curl -s -4 ifconfig.me)
+        echo "::add-mask::$PRIVATE_IP"
+        echo "::add-mask::$PUBLIC_IP"
+        echo "PRIVATE_IP=$PRIVATE_IP" >> $GITHUB_ENV
+        echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+
+    - name: Send Credentials to Telegram
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_USER_ID: ${{ env.TELEGRAM_USER_ID }}
+      run: |
+        RUN_ID="${{ github.run_id }}"
+        echo "::add-mask::$RUN_ID"
+
+        # Use HTML format with VPN info
+        MESSAGE="🚀 <b>${{ github.event.inputs.image }} is Now Live! (VPN Protected)</b>%0A%0A"
+        MESSAGE+="☁️ <b>Cloudflare Tunnel:</b> <a href=\"${CF_URL}\">Click Here</a>%0A%0A"
+        MESSAGE+="🔐 <b>VPN Status:</b> ✅ Protected by Cloudflare WARP%0A"
+        MESSAGE+="🌍 <b>VPN IP:</b> <code>${VPN_IP}</code>%0A"
+        MESSAGE+="🌎 <b>Host IP:</b> <code>${PUBLIC_IP}</code>%0A%0A"
+        MESSAGE+="🔹 <b>Neko Password:</b> <code>${NEKO_PASSWORD}</code>%0A"
+        MESSAGE+="🔹 <b>Neko Admin Password:</b> <code>${NEKO_PASSWORD_ADMIN}</code>%0A%0A"
+        MESSAGE+="ℹ️ <b>Note:</b> Your connection to Neko is VPN-free, but Neko's internet traffic goes through Cloudflare WARP%0A%0A"
+        MESSAGE+="🆔 <b>Run ID:</b> <code>${RUN_ID}</code>"
+        INLINE_KEYBOARD='{"inline_keyboard":[[{"text":"Cancel","callback_data":"'"$RUN_ID"'"}]]}'
+
+        echo "Sending credentials to Telegram..."
+
+        RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+          -d "chat_id=$TELEGRAM_USER_ID" \
+          -d "text=$MESSAGE" \
+          -d "parse_mode=HTML" \
+          -d "reply_markup=$INLINE_KEYBOARD")
+
+        # Check if message was sent successfully
+        if echo "$RESPONSE" | grep -q '"ok":true'; then
+          echo "✅ Message sent successfully!"
+        else
+          echo "❌ Failed to send message!"
+          ERROR_DESC=$(echo "$RESPONSE" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
+          if [ -n "$ERROR_DESC" ]; then
+            echo "Error: $ERROR_DESC"
+          else
+            echo "No error description available"
+          fi
+          exit 1
+        fi
+
+    - name: Keep instance alive (6 hours with periodic health checks)
+      run: |
+        echo "Instance is running. Performing periodic health checks..."
+        END_TIME=$((SECONDS + 21600))  # 6 hours from now
+
+        while [ $SECONDS -lt $END_TIME ]; do
+          # Check if containers are still running
+          if ! docker ps | grep -q neko-container; then
+            echo "⚠️ Neko container stopped unexpectedly!"
+            exit 1
+          fi
+
+          if ! docker ps | grep -q warp; then
+            echo "⚠️ WARP container stopped unexpectedly!"
+            exit 1
+          fi
+
+          # Health check
+          if curl -sf http://localhost:8080 > /dev/null 2>&1; then
+            echo "✅ Health check passed at $(date)"
+          else
+            echo "⚠️ Health check failed at $(date)"
+          fi
+
+          # WARP connection check
+          WARP_STATUS=$(docker run --rm --network neko-network curlimages/curl:latest \
+            --connect-timeout 5 --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "failed")
+          if [ "$WARP_STATUS" != "failed" ]; then
+            echo "✅ WARP still connected: $WARP_STATUS"
+          else
+            echo "⚠️ WARP connection check failed at $(date)"
+          fi
+
+          # Sleep for 5 minutes before next check
+          sleep 300
+        done
+
+        echo "🕐 6 hour limit reached. Shutting down gracefully..."
+
+    - name: Send Error Notification
+      if: failure()
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_USER_ID: ${{ env.TELEGRAM_USER_ID }}
+      run: |
+        RUN_ID="${{ github.run_id }}"
+        REPO="${{ github.repository }}"
+        echo "::add-mask::$RUN_ID"
+        echo "::add-mask::$REPO"
+
+        ERROR_MESSAGE="❌ <b>VPN-Protected Deployment Failed</b>%0A%0A"
+        ERROR_MESSAGE+="🆔 <b>Run ID:</b> <code>$RUN_ID</code>%0A"
+        ERROR_MESSAGE+="🔗 <b>Logs:</b> <a href=\"https://github.com/$REPO/actions/runs/$RUN_ID\">View Details</a>"
+
+        echo "Sending error notification..."
+
+        RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+          -d "chat_id=$TELEGRAM_USER_ID" \
+          -d "text=$ERROR_MESSAGE" \
+          -d "parse_mode=HTML")
+
+        # Check without printing full response
+        if echo "$RESPONSE" | grep -q '"ok":true'; then
+          echo "✅ Error notification sent!"
+        else
+          echo "⚠️ Failed to send error notification (non-critical)"
+        fi
+
+    - name: Cleanup Resources
+      if: always()
+      run: |
+        echo "🧹 Cleaning up resources..."
+
+        # Stop and remove Docker containers
+        docker stop neko-container 2>/dev/null || true
+        docker rm neko-container 2>/dev/null || true
+        docker stop warp 2>/dev/null || true
+        docker rm warp 2>/dev/null || true
+
+        # Remove network
+        docker network rm neko-network 2>/dev/null || true
+
+        # Kill tunnel processes
+        pkill -f cloudflared || true
+
+        # Show cleanup summary
+        echo "✅ Cleanup completed"
+        docker ps -a | grep -E "neko-container|warp" || echo "All containers removed"
+        pgrep -f "cloudflared" || echo "All tunnel processes stopped"

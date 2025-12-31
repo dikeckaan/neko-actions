@@ -278,11 +278,18 @@ async function answerCallbackQuery(callbackQueryId, env, options = {}) {
 /**
  * Trigger GitHub Actions workflow
  */
-async function triggerWorkflow(chatId, image, env) {
+async function triggerWorkflow(chatId, image, useVPN, env) {
   const githubRepo = env.GITHUB_REPO || "dikeckaan/neko-actions";
-  const workflowName = env.WORKFLOW_NAME || "telegram-bot.yml";
+
+  // Select workflow based on VPN flag
+  const workflowName = useVPN
+    ? "telegram-bot-with-vpn.yml"
+    : (env.WORKFLOW_NAME || "telegram-bot.yml");
+
   const branch = env.GITHUB_BRANCH || "improvements";
   const cfToken = env.CLOUDFLARE_TUNNEL_TOKEN || "";
+
+  console.log(`Using workflow: ${workflowName} (VPN: ${useVPN})`);
 
   const url = `https://api.github.com/repos/${githubRepo}/actions/workflows/${workflowName}/dispatches`;
   const headers = {
@@ -448,8 +455,17 @@ async function handleMessage(message, env) {
   }
 
   // Extract command (remove leading /, ignore parameters)
-  const command = message.text.split(" ")[0].substring(1).split("@")[0];
+  let command = message.text.split(" ")[0].substring(1).split("@")[0];
   console.log(`Processing command: ${command}`);
+
+  // Check for VPN suffix
+  let useVPN = false;
+  if (command.endsWith("vpn")) {
+    useVPN = true;
+    // Remove "vpn" suffix to get base command
+    command = command.slice(0, -3);
+    console.log(`VPN mode detected! Base command: ${command}`);
+  }
 
   // Route to appropriate handler
   switch (command) {
@@ -474,7 +490,7 @@ async function handleMessage(message, env) {
     default:
       // Check if it's a browser command
       if (BROWSER_COMMANDS[command]) {
-        await handleBrowserCommand(message, command, env);
+        await handleBrowserCommand(message, command, useVPN, env);
       } else {
         console.log(`Unknown command: ${command}`);
       }
@@ -515,7 +531,7 @@ async function handleStartCommand(message, env) {
 async function handleHelpCommand(message, env) {
   const githubRepo = env.GITHUB_REPO || "dikeckaan/neko-actions";
 
-  const helpText = `📖 *User Guide*\n\n*How to Use:*\n1️⃣ Choose a browser or desktop environment\n2️⃣ Send the command (e.g., \`/chrome\`)\n3️⃣ Wait for deployment (takes ~1-2 minutes)\n4️⃣ Receive connection details via message\n5️⃣ Click *Cancel* button to stop the instance\n\n*Available Commands:*\n• \`/start\` - Show welcome menu\n• \`/help\` - Show this guide\n• \`/actionslist\` - List all browser commands\n\n*Runner Management:*\n• \`/activerunners\` - List all active runners\n• \`/stop <runner_id>\` - Stop a specific runner\n• \`/killallrunners\` - Stop all active runners\n\n*Instance Details:*\n• Runtime: Up to 6 hours\n• Access: Via Cloudflare Tunnel, Bore or LocalTunnel\n• Auto-cleanup: Resources freed after stop\n• Health checks: Every 5 minutes\n\n*Troubleshooting:*\n❌ If deployment fails, you'll receive an error message\n🔄 Check GitHub Actions logs for details\n⏱️ Cancel button works immediately\n\n💡 *Repository:* [GitHub](https://github.com/${githubRepo})`;
+  const helpText = `📖 *User Guide*\n\n*How to Use:*\n1️⃣ Choose a browser or desktop environment\n2️⃣ Send the command (e.g., \`/chrome\`)\n3️⃣ Wait for deployment (takes ~1-2 minutes)\n4️⃣ Receive connection details via message\n5️⃣ Click *Cancel* button to stop the instance\n\n*Available Commands:*\n• \`/start\` - Show welcome menu\n• \`/help\` - Show this guide\n• \`/actionslist\` - List all browser commands\n\n*VPN Mode:*\n• Add \`vpn\` suffix to any command\n• Example: \`/chromevpn\`, \`/firefoxvpn\`\n• Your connection: VPN-free (fast)\n• Browser traffic: Through Cloudflare WARP\n\n*Runner Management:*\n• \`/activerunners\` - List all active runners\n• \`/stop <runner_id>\` - Stop a specific runner\n• \`/killallrunners\` - Stop all active runners\n\n*Instance Details:*\n• Runtime: Up to 6 hours\n• Access: Via Cloudflare Tunnel, Bore or LocalTunnel\n• Auto-cleanup: Resources freed after stop\n• Health checks: Every 5 minutes\n\n*Troubleshooting:*\n❌ If deployment fails, you'll receive an error message\n🔄 Check GitHub Actions logs for details\n⏱️ Cancel button works immediately\n\n💡 *Repository:* [GitHub](https://github.com/${githubRepo})`;
 
   await sendMessage(message.chat.id, helpText, env, {
     parse_mode: "Markdown",
@@ -529,7 +545,7 @@ async function handleHelpCommand(message, env) {
 async function handleActionsListCommand(message, env) {
   const commandList = Object.keys(BROWSER_COMMANDS).map(cmd => `• \`/${cmd}\``).join("\n");
 
-  const responseText = `🎯 *Available Commands:*\n\n${commandList}\n\n*Usage:*\nSimply type any command above to start an instance\nExample: \`/chrome\` to start Google Chrome\n\nTo stop a running instance, click the *Cancel* button on the deployment message.`;
+  const responseText = `🎯 *Available Commands:*\n\n${commandList}\n\n*Usage:*\nSimply type any command above to start an instance\nExample: \`/chrome\` to start Google Chrome\n\n*VPN Protection:*\nAdd \`vpn\` suffix to use Cloudflare WARP\nExample: \`/chromevpn\` for VPN-protected Chrome\n\n*Note:*\n• Normal: Fast connection, no VPN\n• VPN mode: Your connection is VPN-free, but browser traffic goes through Cloudflare WARP\n\nTo stop a running instance, click the *Cancel* button on the deployment message.`;
 
   await sendMessage(message.chat.id, responseText, env, {
     parse_mode: "Markdown"
@@ -539,20 +555,23 @@ async function handleActionsListCommand(message, env) {
 /**
  * Handle browser/desktop launch commands
  */
-async function handleBrowserCommand(message, command, env) {
+async function handleBrowserCommand(message, command, useVPN, env) {
   const imageName = BROWSER_COMMANDS[command];
   const chatId = String(message.chat.id);
 
-  console.log(`User ${message.from.id} requested ${imageName} in chat ${chatId}`);
+  const vpnMode = useVPN ? " (VPN Protected)" : "";
+  console.log(`User ${message.from.id} requested ${imageName}${vpnMode} in chat ${chatId}`);
 
   // Send initial acknowledgment
+  const vpnIndicator = useVPN ? "🔐 " : "🔄 ";
+  const vpnText = useVPN ? " with VPN protection" : "";
   console.log(`Sending acknowledgment message for ${imageName}...`);
-  const ackResult = await sendMessage(chatId, `🔄 Starting ${imageName} instance...`, env);
+  const ackResult = await sendMessage(chatId, `${vpnIndicator}Starting ${imageName} instance${vpnText}...`, env);
   console.log(`Acknowledgment message status: ${ackResult.ok ? 'success' : 'failed'}`);
 
   // Trigger GitHub Actions workflow
-  console.log(`Triggering GitHub Actions workflow for ${imageName}...`);
-  const result = await triggerWorkflow(chatId, imageName, env);
+  console.log(`Triggering GitHub Actions workflow for ${imageName} (VPN: ${useVPN})...`);
+  const result = await triggerWorkflow(chatId, imageName, useVPN, env);
   console.log(`Workflow trigger result: ${result.success ? 'success' : 'failed'}`);
 
   const finalResult = await sendMessage(chatId, result.message, env);
@@ -723,7 +742,7 @@ async function handleCallbackQuery(callbackQuery, env) {
   if (data === "list_commands") {
     console.log("Handling list_commands callback");
     const commandList = Object.keys(BROWSER_COMMANDS).map(cmd => `• \`/${cmd}\``).join("\n");
-    const responseText = `🎯 *Available Commands:*\n\n${commandList}\n\n*Usage:*\nSimply type any command above to start an instance\nExample: \`/chrome\` to start Google Chrome`;
+    const responseText = `🎯 *Available Commands:*\n\n${commandList}\n\n*Usage:*\nSimply type any command above to start an instance\nExample: \`/chrome\` to start Google Chrome\n\n*VPN Mode:*\nAdd \`vpn\` suffix for VPN protection\nExample: \`/chromevpn\` for VPN-protected Chrome`;
 
     await editMessage(chatId, messageId, responseText, env, {
       parse_mode: "Markdown"
@@ -733,7 +752,7 @@ async function handleCallbackQuery(callbackQuery, env) {
 
   if (data === "show_help") {
     console.log("Handling show_help callback");
-    const helpText = `📖 *Quick Guide*\n\n*Steps:*\n1️⃣ Send a command (e.g., \`/chrome\`)\n2️⃣ Wait ~1-2 minutes for deployment\n3️⃣ Receive connection URLs\n4️⃣ Click *Cancel* to stop\n\n*Runtime:* Up to 6 hours\n*Access:* Cloudflare Tunnel, Bore or LocalTunnel\n*Auto-cleanup:* Yes\n\nUse \`/help\` for full documentation`;
+    const helpText = `📖 *Quick Guide*\n\n*Steps:*\n1️⃣ Send a command (e.g., \`/chrome\`)\n2️⃣ Wait ~1-2 minutes for deployment\n3️⃣ Receive connection URLs\n4️⃣ Click *Cancel* to stop\n\n*VPN Mode:*\nAdd \`vpn\` suffix: \`/chromevpn\`\nYour connection: VPN-free\nBrowser traffic: Via Cloudflare WARP\n\n*Runtime:* Up to 6 hours\n*Access:* Cloudflare Tunnel, Bore or LocalTunnel\n*Auto-cleanup:* Yes\n\nUse \`/help\` for full documentation`;
 
     await editMessage(chatId, messageId, helpText, env, {
       parse_mode: "Markdown"
