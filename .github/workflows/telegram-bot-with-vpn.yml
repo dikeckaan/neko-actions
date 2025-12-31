@@ -57,19 +57,18 @@ jobs:
           --privileged \
           --restart=always \
           --network neko-network \
+          --cap-add NET_ADMIN \
+          --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+          -e WARP_SLEEP=2 \
           -v /lib/modules:/lib/modules \
-          caomingjun/warp:latest
+          e1732a04/warp-socks:latest
 
         echo "⏳ Waiting for WARP connection to establish..."
-        sleep 20
+        sleep 30
 
         # Check WARP status
-        if docker logs warp 2>&1 | grep -qE "Successfully registered|Connected|Registration success"; then
-          echo "✅ WARP connected successfully"
-        else
-          echo "ℹ️ Checking WARP logs..."
-          docker logs warp | tail -20
-        fi
+        echo "Checking WARP container logs..."
+        docker logs warp 2>&1 | tail -30
 
     - name: Verify WARP Connection
       run: |
@@ -91,7 +90,7 @@ jobs:
 
           WARP_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
             --connect-timeout 5 --max-time 10 \
-            --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "")
+            --socks5 warp:1080 https://api.ipify.org 2>/dev/null || echo "")
 
           if [ -n "$WARP_IP" ] && [ "$WARP_IP" != "failed" ]; then
             echo "✅ WARP proxy is ready!"
@@ -99,7 +98,7 @@ jobs:
           fi
 
           RETRY_COUNT=$((RETRY_COUNT + 1))
-          sleep 2
+          sleep 3
         done
 
         if [ -z "$WARP_IP" ]; then
@@ -148,7 +147,7 @@ jobs:
         echo "Using image: $DOCKER_IMAGE"
 
         # Run container with WARP SOCKS5 proxy
-        # caomingjun/warp provides SOCKS5 on port 40000
+        # e1732a04/warp-socks provides SOCKS5 on port 1080
         docker run -d \
           --name neko-container \
           --network neko-network \
@@ -156,12 +155,8 @@ jobs:
           --shm-size="2gb" \
           -e NEKO_PASSWORD=$NEKO_PASSWORD \
           -e NEKO_PASSWORD_ADMIN=$NEKO_PASSWORD_ADMIN \
-          -e ALL_PROXY=socks5://warp:40000 \
-          -e HTTP_PROXY=http://warp:40001 \
-          -e HTTPS_PROXY=http://warp:40001 \
-          -e all_proxy=socks5://warp:40000 \
-          -e http_proxy=http://warp:40001 \
-          -e https_proxy=http://warp:40001 \
+          -e ALL_PROXY=socks5://warp:1080 \
+          -e all_proxy=socks5://warp:1080 \
           -v "${GITHUB_WORKSPACE}/policies/chromium/policies.json:/etc/opt/chrome/policies/managed/policies.json" \
           -p 8080:8080 \
           -p 52000-52100:52000-52100/udp \
@@ -196,7 +191,7 @@ jobs:
         echo "Testing WARP SOCKS5 proxy..."
         TEST_IP=$(docker run --rm --network neko-network curlimages/curl:latest \
           --connect-timeout 5 --max-time 10 \
-          --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "failed")
+          --socks5 warp:1080 https://api.ipify.org 2>/dev/null || echo "failed")
 
         if [ "$TEST_IP" != "failed" ] && [ -n "$TEST_IP" ]; then
           echo "✅ WARP proxy is working correctly"
@@ -329,7 +324,7 @@ jobs:
           # WARP connection check
           WARP_STATUS=$(docker run --rm --network neko-network curlimages/curl:latest \
             --connect-timeout 5 --max-time 10 \
-            --socks5 warp:40000 https://api.ipify.org 2>/dev/null || echo "failed")
+            --socks5 warp:1080 https://api.ipify.org 2>/dev/null || echo "failed")
           if [ "$WARP_STATUS" != "failed" ] && [ -n "$WARP_STATUS" ]; then
             echo "✅ WARP still connected: $WARP_STATUS"
           else
